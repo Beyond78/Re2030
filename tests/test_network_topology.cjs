@@ -36,6 +36,10 @@ test('physical measurements, timing and hardwire controls never enter either swi
     assert.equal(model.routes.get(id).network_id, null, id);
   }
   assert.equal(model.cables.find(c => c.id === 'L-time-mu').kind, 'timing');
+  const timing = model.routes.get('L-time-mu').points;
+  assert.deepEqual(timing, ['time_svc', 'mu'].map(id => ({
+    x: coordinates[id].x + 45, y: coordinates[id].y + 24,
+  })), 'timing cable must connect directly without intermediate bends');
 });
 
 test('packets enter only the intended switch and reverse along exactly the same cable', () => {
