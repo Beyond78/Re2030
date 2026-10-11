@@ -107,7 +107,7 @@ test('old scenarios still render original physical links with no invented IDS', 
 });
 
 test('all scenario layouts keep devices in their layers and IDS mirror ports aligned', () => {
-  for (const filename of ['substation-live.json', 'substation-attack-demo.json', 'substation-em-attack.json']) {
+  for (const filename of ['substation-live.json', 'substation-attack-demo.json', 'substation-em-attack.json', 'substation-network-attack.json']) {
     const config = JSON.parse(fs.readFileSync(path.join(__dirname, '../scenarios', filename), 'utf8'));
     const bands = new Map(config.layout.layers.map(b => [b.key, b]));
     for (const device of config.devices) {
@@ -118,6 +118,12 @@ test('all scenario layouts keep devices in their layers and IDS mirror ports ali
     for (const network of config.layout.deployment.networks) {
       assert.equal(network.switch.y + network.switch.height / 2, network.probe.y + network.probe.height / 2);
       assert.ok(network.switch.x > Math.max(...config.layout.layers.map(b => b.x + b.width)));
+      const manager = config.layout.deployment.manager;
+      assert.ok(manager.y + manager.height < network.probe.y, 'monitoring platform must sit above both IDS probes');
+    }
+    const layoutModel = topology.build(config, Object.fromEntries(config.devices.map(d => [d.device_id, d.layout])));
+    for (const cable of layoutModel.cables.filter(c => c.kind === 'management')) {
+      assert.ok(cable.points[0].y > cable.points.at(-1).y, 'IDS reporting must lead upward to the platform');
     }
     const time = config.devices.find(d => d.device_id === 'time_svc');
     const mu = config.devices.find(d => d.device_id === 'mu');
