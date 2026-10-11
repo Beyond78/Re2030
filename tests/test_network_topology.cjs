@@ -105,3 +105,22 @@ test('old scenarios still render original physical links with no invented IDS', 
   assert.equal(legacy.cables.length,scene.links.length);
   assert.equal(legacy.routes.size,scene.links.length);
 });
+
+test('all scenario layouts keep devices in their layers and IDS mirror ports aligned', () => {
+  for (const filename of ['substation-live.json', 'substation-attack-demo.json', 'substation-em-attack.json']) {
+    const config = JSON.parse(fs.readFileSync(path.join(__dirname, '../scenarios', filename), 'utf8'));
+    const bands = new Map(config.layout.layers.map(b => [b.key, b]));
+    for (const device of config.devices) {
+      const band = bands.get(device.layer), p = device.layout;
+      assert.ok(p.x >= band.x && p.x + 90 <= band.x + band.width, `${filename}: ${device.device_id} horizontal containment`);
+      assert.ok(p.y >= band.y + 28 && p.y + 48 <= band.y + band.height, `${filename}: ${device.device_id} must clear the layer title`);
+    }
+    for (const network of config.layout.deployment.networks) {
+      assert.equal(network.switch.y + network.switch.height / 2, network.probe.y + network.probe.height / 2);
+      assert.ok(network.switch.x > Math.max(...config.layout.layers.map(b => b.x + b.width)));
+    }
+    const time = config.devices.find(d => d.device_id === 'time_svc');
+    const mu = config.devices.find(d => d.device_id === 'mu');
+    assert.equal(time.layout.x, mu.layout.x, 'timing cable must remain vertical');
+  }
+});

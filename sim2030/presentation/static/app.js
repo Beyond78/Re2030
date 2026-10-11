@@ -225,6 +225,7 @@ async function createRun() {
   state.runId = payload.run_id;
   state.renderedTopologyOnce = false;
   $("#run-id").textContent = payload.run_id;
+  $("#run-id").title = payload.run_id;
   setStatus(`运行已创建：${payload.run_id}`);
 
   startPolling();
@@ -839,6 +840,32 @@ function renderLayerBands(bands) {
   group.appendChild(frag);
 }
 
+function renderNetworkRegions(model, bands) {
+  const group = $("#topo-regions");
+  if (!group) return;
+  const key = JSON.stringify([model.assets, bands]);
+  if (group.dataset.renderKey === key) return;
+  group.dataset.renderKey = key;
+  group.replaceChildren();
+  if (!model.networks.length) return;
+  const switchX = Math.min(...model.networks.map(n => n.switch.x));
+  const probeX = Math.min(...model.networks.map(n => n.probe.x));
+  const top = Math.min(...bands.map(b => b.y));
+  const bottom = Math.max(...bands.map(b => b.y + b.height), ...model.assets.map(a => a.y + a.height + 20));
+  const right = Math.max(...model.assets.map(a => a.x + a.width)) + 42;
+  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  Object.entries({ x: probeX - 14, y: top, width: right - probeX + 14, height: bottom - top, rx: 10,
+    class: "monitoring-region" }).forEach(([key, value]) => rect.setAttribute(key, value));
+  group.appendChild(rect);
+  [[Math.min(...bands.map(b => b.x)) + 14, "设备与业务连接"], [switchX, "通信交换"], [probeX, "网络安全监测"]].forEach(([x, title]) => {
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("x", x); text.setAttribute("y", top - 16);
+    text.setAttribute("class", "topology-column-title");
+    text.textContent = title;
+    group.appendChild(text);
+  });
+}
+
 /* 画布尺寸由场景版式外接矩形推导，也允许场景用 layout.canvas 覆盖 */
 function applyCanvasSize(layout, bands) {
   const svg = $("#topo-svg");
@@ -877,6 +904,8 @@ function applyTopoTransform() {
   svg.style.width = `${Math.round(state.canvasSize.width * state.zoom)}px`;
   svg.style.height = `${Math.round(state.canvasSize.height * state.zoom)}px`;
   svg.style.transform = `translate(${state.pan.x.toFixed(1)}px, ${state.pan.y.toFixed(1)}px)`;
+  const zoomValue = $("#topo-zoom-value");
+  if (zoomValue) zoomValue.textContent = `${Math.round(state.zoom * 100)}%`;
   updateViewResetVisibility();
 }
 
@@ -905,10 +934,27 @@ function fitTopoToViewport() {
 }
 
 /* 拓扑视口交互：左键拖动自由平移，Ctrl+滚轮以光标为锚点缩放，窗口变化时自动重新铺满 */
+function setTopologyExpanded(expanded) {
+  const button = $("#topology-expand");
+  document.body.classList.toggle("topology-expanded", expanded);
+  button.setAttribute("aria-pressed", String(expanded));
+  button.textContent = expanded ? "退出展开" : "展开拓扑";
+  requestAnimationFrame(resetTopoView);
+}
+
 function setupTopoInteraction() {
   const viewport = $("#topo-viewport");
   if (!viewport || viewport.dataset.bound === "1") return;
   viewport.dataset.bound = "1";
+
+  const expandButton = $("#topology-expand");
+  expandButton.addEventListener("click", () => setTopologyExpanded(!document.body.classList.contains("topology-expanded")));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && document.body.classList.contains("topology-expanded") && !$("#packet-inspector").classList.contains("open")) setTopologyExpanded(false);
+  });
+  new ResizeObserver(() => {
+    if (!state.viewTouched) fitTopoToViewport();
+  }).observe(viewport);
 
   let drag = null;
   viewport.addEventListener("mousedown", (event) => {
@@ -1016,6 +1062,7 @@ function applyScenarioLayout(topo) {
   const bands = resolveLayerBands(layout, devices);
   state.networkModel = NetworkTopology.build(topo, NODE_COORDINATES);
   renderLayerBands(bands);
+  renderNetworkRegions(state.networkModel, bands);
   applyCanvasSize(layout, bands);
   renderLinkLegend(topo.links || []);
 }
@@ -1117,6 +1164,7 @@ function getDeviceDynamicText(devId, mgmt, env) {
 
 function selectNetworkAsset(id) {
   if (state.dragMoved) return;
+  if (document.body.classList.contains("topology-expanded")) setTopologyExpanded(false);
   state.selectedNetworkAsset = id;
   renderNetworkAssets(state.systemData || {});
   renderNetworkInspector(state.systemData || {});
@@ -1183,13 +1231,6 @@ function renderNetworkAssets(data) {
         <text x="${port.anchor.x + 6}" y="${port.anchor.y + (port.anchor_y ? 12 : -7)}">${esc(port.interface_id)}</text>
         <circle cx="${port.port.x}" cy="${port.port.y}" r="2.5" />`;
       group.appendChild(node);
-    }
-    if (model.assets.length) {
-      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      label.setAttribute("x", Math.min(...model.networks.map(n => n.probe.x))); label.setAttribute("y", "150");
-      label.setAttribute("class", "monitoring-zone-title");
-      label.textContent = "网络安全监测";
-      group.appendChild(label);
     }
   }
   group.querySelectorAll("[data-network-asset]").forEach(node => {
@@ -1264,6 +1305,15 @@ function renderNetworkInspector(data) {
   }
 }
 
+function renderNodeTitle(name) {
+  const characters = Array.from(String(name));
+  if (characters.length <= 7) {
+    return `<text x="45" y="22" text-anchor="middle" class="node-title">${esc(name)}</text>`;
+  }
+  const split = Math.ceil(characters.length / 2);
+  return `<text x="45" text-anchor="middle" class="node-title node-title-wrapped"><tspan x="45" y="15">${esc(characters.slice(0, split).join(""))}</tspan><tspan x="45" y="29">${esc(characters.slice(split).join(""))}</tspan></text>`;
+}
+
 /* 渲染/增量更新态势拓扑图 (SVG) */
 function renderTopology(data) {
   const topo = data.topology || {};
@@ -1335,7 +1385,7 @@ function renderTopology(data) {
 
       g.innerHTML = `
         <rect width="90" height="48" rx="6"></rect>
-        <text x="45" y="22" text-anchor="middle" class="node-title">${esc(dev.name || id)}</text>
+        ${renderNodeTitle(dev.name || id)}
         <text x="45" y="42" text-anchor="middle" class="node-status-text" id="node-text-${esc(id)}">${esc(dynamicText)}</text>
       `;
 
@@ -1773,6 +1823,7 @@ function renderMcMonitor(overview) {
 
 /* 选中设备：只驱动左侧控制面板，不再在右侧渲染设备详情 */
 function inspectDevice(deviceId, fillTarget = false) {
+  if (document.body.classList.contains("topology-expanded")) setTopologyExpanded(false);
   state.selectedDeviceId = deviceId;
   if (fillTarget) {
     loadDeviceControls(deviceId);

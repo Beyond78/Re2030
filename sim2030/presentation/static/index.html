@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>国家重点研发计划2030 · 感控系统安全态势大屏</title>
-  <link rel="stylesheet" href="/style.css?v=20261011">
+  <link rel="stylesheet" href="/style.css?v=20261011-layout2">
 </head>
 <body>
   <!-- 顶部状态栏 -->
@@ -106,14 +106,15 @@
     <section class="panel center-panel">
       <div class="panel-header tab-header">
         <div class="tabs">
-          <button class="tab active" data-view="system">⚡ 变电站态势拓扑</button>
-          <button class="tab" data-view="timeline">⏳ 攻防时序时间线</button>
-          <button class="tab" data-view="observations">📡 五类全域监测</button>
-          <button class="tab" data-view="recognition">🔍 智能攻击识别</button>
-          <button class="tab" data-view="defense">🛡 主动安全防御</button>
-          <button class="tab" data-view="evaluation">📊 效能评估对比</button>
+          <button class="tab active" data-view="system">态势拓扑</button>
+          <button class="tab" data-view="timeline">攻防时序</button>
+          <button class="tab" data-view="observations">观测数据</button>
+          <button class="tab" data-view="recognition">攻击识别</button>
+          <button class="tab" data-view="defense">防御处置</button>
+          <button class="tab" data-view="evaluation">效能评估</button>
         </div>
         <div class="view-actions">
+          <button type="button" id="topology-expand" class="legend-btn" aria-pressed="false">展开拓扑</button>
           <button class="btn btn-icon" id="btn-refresh" title="即时刷新" style="padding: 6px 10px; font-size: 14px;">↻</button>
         </div>
       </div>
@@ -172,12 +173,16 @@
         </div>
       </div>
         <!-- SVG 拓扑画布：可拖动平移，Ctrl+滚轮缩放 -->
-        <div id="topo-viewport" class="topo-viewport">
+        <div class="topo-toolbar">
         <div class="topo-zoom-controls">
           <button type="button" id="zoom-in" class="legend-btn" aria-label="放大拓扑">＋</button>
           <button type="button" id="zoom-out" class="legend-btn" aria-label="缩小拓扑">−</button>
+          <span id="topo-zoom-value" class="topo-zoom-value">自动适配</span>
         </div>
+        <span class="topo-gesture-hint">拖动平移 · Ctrl + 滚轮缩放</span>
         <button type="button" id="zoom-reset" class="legend-btn topo-reset-btn" title="恢复到自动铺满并居中">重置视图</button>
+        </div>
+        <div id="topo-viewport" class="topo-viewport">
         <svg id="topo-svg" class="topo-svg" viewBox="0 0 920 780" preserveAspectRatio="xMidYMid meet">
           <defs>
             <marker id="monitor-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
@@ -200,6 +205,7 @@
 
           <!-- 背景分层标尺与区域背景 -->
           <!-- 分层背景带由场景版式（layout.layers）在脚本中生成 -->
+          <g id="topo-regions" aria-hidden="true"></g>
           <g id="topo-layers" class="topo-layers-bg"></g>
 
           <!-- 拓扑连接线图层 -->
@@ -269,6 +275,6 @@
   <div id="packet-inspector-toast" class="packet-inspector-toast" role="status" aria-live="polite"></div>
 
   <script src="/network-topology.js?v=20261011"></script>
-  <script src="/app.js?v=20261011"></script>
+  <script src="/app.js?v=20261011-layout2"></script>
 </body>
 </html>
