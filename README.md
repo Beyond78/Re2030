@@ -19,6 +19,7 @@
 - `sim2030/presentation/`：标准库 HTTP 服务、展示视图与静态页面。
 - `scenarios/substation-live.json`：基础 10kV 变电站场景。
 - `scenarios/substation-network-attack.json`：基于基础场景的网络攻击前端展示。
+- `scenarios/substation-goose-*.json`：message_core 交付包的正常、伪造、抑制、DoS 离线回放。
 - `tests/`：使用标准库 `unittest` 的回归测试。
 - `main.py`：无界面运行入口或演示平面入口。
 
@@ -46,6 +47,10 @@ D:\python\python.exe main.py --ui --scenario scenarios/substation-live.json --ou
 “变电站网络攻击场景（展示）”提供未授权控制命令的分阶段示意。加载后可在左侧选择攻击演示阶段，
 查看命令路径、潜在执行风险及 IDS 可核验线索。阶段选择不会执行攻击、改变设备状态或生成真实告警。
 资料依据与实现范围见 [网络攻击展示场景依据](docs/网络攻击展示场景依据.md)。
+
+GOOSE 报文回放需先导入本地交付包：`python tools/import_message_core.py "路径/message_core.zip"`。
+导入后选择左侧的“GOOSE 回放”场景，启动或单步推进，在右侧点击帧号查看原始字段和字节。
+原始数据和标签保存在 Git 忽略的 `data/message_core/`，接入说明见 [GOOSE 报文接入](docs/GOOSE报文接入.md)。
 
 演示平面提供以下最小接口：
 

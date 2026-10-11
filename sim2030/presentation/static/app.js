@@ -24,6 +24,11 @@ const state = {
   dragMoved: false,
   selectedNetworkAsset: "ids-station",
   networkModel: null,
+  gooseRunId: null,
+  goosePage: null,
+  gooseBefore: null,
+  gooseRequest: 0,
+  gooseDetailRequest: 0,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -103,6 +108,9 @@ function openPacketInspector(message) {
   const body = $("#packet-inspector-body");
   const copyStatus = $("#packet-inspector-copy-status");
   if (!inspector || !body || !message) return;
+  $("#packet-inspector-title").textContent = "内部报文（Message）";
+  $(".packet-inspector-kicker").textContent = "运行期通信队列";
+  $(".packet-inspector-notice").textContent = "仅展示后端真实存在的 Message 字段，不代表原始 IEC 61850 / SV 线路帧。";
 
   const rawJson = JSON.stringify(message, null, 2);
   inspector.dataset.rawJson = rawJson;
@@ -195,6 +203,11 @@ async function loadScenarios() {
     const li = document.createElement("li");
     li.innerHTML = `<strong>${esc(scenario.name || scenario.scenario_id)}</strong>`;
     li.dataset.scenarioId = scenario.scenario_id;
+    if (scenario.data_available === false) {
+      li.setAttribute("aria-disabled", "true");
+      li.title = scenario.unavailable_reason;
+      li.innerHTML += `<small class="scenario-unavailable">${esc(scenario.unavailable_reason)}</small>`;
+    }
     li.setAttribute("role", "button");
     li.setAttribute("tabindex", "0");
     li.addEventListener("keydown", (event) => {
@@ -204,6 +217,7 @@ async function loadScenarios() {
       }
     });
     li.addEventListener("click", () => {
+      if (scenario.data_available === false) return;
       state.selectedScenario = scenario.scenario_id;
       list.querySelectorAll("li").forEach((node) => node.classList.remove("selected"));
       li.classList.add("selected");
@@ -213,7 +227,7 @@ async function loadScenarios() {
   });
 
   if (state.scenarios.length > 0 && !state.selectedScenario) {
-    list.querySelector("li")?.click();
+    list.querySelector('li:not([aria-disabled="true"])')?.click();
   }
   setStatus(`已就绪，发现场景 ${state.scenarios.length} 个`);
 }
@@ -601,7 +615,110 @@ async function refreshViews() {
   }
   renderNetworkInspector(data);
   renderCyberDemo(data);
+  renderGooseCapture(data);
   return true;
+}
+
+function renderGooseCapture(data) {
+  const summary = $("#goose-capture-summary"), panel = $("#goose-frame-panel");
+  const capture = data.packet_capture;
+  summary.hidden = panel.hidden = !capture;
+  if (!capture) return;
+  if (state.gooseRunId !== data.run_id) {
+    state.gooseRunId = data.run_id;
+    state.goosePage = null;
+    state.gooseBefore = null;
+    state.gooseRequest++;
+    state.gooseDetailRequest++;
+  }
+  if (!capture.available) {
+    summary.innerHTML = `<div class="capture-notice">${esc(capture.reason || '样本不可用，请先导入数据')}</div>`;
+    panel.innerHTML = "";
+    delete panel.dataset.renderKey;
+    return;
+  }
+  summary.innerHTML = `<div class="capture-title">GOOSE 样本回放 <span>合成数据</span></div>
+    <p>${esc(capture.name)} · ${capture.visible_frames} / ${capture.total_frames} 帧</p>
+    <p class="capture-muted">预期发布/订阅：${esc(capture.goose_config.publisher)} → ${esc(capture.goose_config.subscriber)}</p>
+    <p class="capture-muted">过程网镜像口 · PCAP 与日志已核对</p>
+    <div class="capture-notice">报文字段不驱动仿真设备。订阅端接收结果与断路器动作未知。</div>`;
+  const page = state.goosePage || capture;
+  const checks = Object.entries(capture.check_counts || {});
+  const rateWarning = capture.peak_frames_1s > capture.baseline.rate_threshold_1s;
+  const html = `<div class="capture-title">GOOSE 逐帧查看</div>
+    <div class="capture-brief">已回放 ${capture.visible_frames} 帧 · 采集时长 ${formatUs(capture.duration_us)}</div>
+    <div class="capture-checks"><b>参考检查提示</b>
+      ${checks.map(([name, count]) => `<p>${esc(name)}：${count} 帧</p>`).join("")}
+      <p class="${rateWarning ? 'capture-warning' : ''}">1 秒峰值 ${capture.peak_frames_1s} 帧 / 参考阈值 ${capture.baseline.rate_threshold_1s} 帧</p>
+      ${!capture.visible_frames ? '<p>等待推演推进后接收报文</p>' : !checks.length && !rateWarning ? '<p>当前未触发参考检查</p>' : ''}
+      <small>阈值取正常样本峰值的 5 倍；提示不等于攻击成功或设备动作。</small></div>
+    <div class="goose-frame-list"><table><thead><tr><th>帧 / 时刻</th><th>st / sq</th><th>trip</th><th>提示</th></tr></thead><tbody>
+      ${(page.frames || []).map(frame => `<tr class="${frame.checks.length ? 'has-check' : ''}">
+        <td><button type="button" data-goose-frame="${frame.frame_no}" aria-label="查看第 ${frame.frame_no} 帧">#${frame.frame_no}</button><small>${(frame.time_us / 1000000).toFixed(6)} s</small></td>
+        <td>${esc(frame.stNum)} / ${esc(frame.sqNum)}</td><td>${frame.trip === true ? 'true' : frame.trip === false ? 'false' : '—'}</td>
+        <td title="${esc(frame.checks.join('；'))}">${frame.checks.length ? `${frame.checks.length} 项` : '—'}</td></tr>`).join("")}
+    </tbody></table>${!page.frames?.length ? '<p class="capture-muted">尚无已到达的帧</p>' : ''}</div>
+    <div class="capture-pagination"><button type="button" id="goose-older" class="btn btn-secondary" ${!page.has_older ? 'disabled' : ''}>较早一页</button><button type="button" id="goose-latest" class="btn btn-secondary" ${state.gooseBefore === null ? 'disabled' : ''}>最新</button></div>
+    <div class="capture-jump"><input id="goose-frame-number" type="number" min="1" max="${capture.visible_frames}" placeholder="帧号" aria-label="GOOSE 帧号"><button type="button" id="goose-frame-open" class="btn btn-secondary" ${!capture.visible_frames ? 'disabled' : ''}>查看</button></div>`;
+  // 页面更新时保留正在输入的帧号和表格滚动位置。
+  if (panel.dataset.renderKey === html) return;
+  const input = $("#goose-frame-number");
+  const editing = input && document.activeElement === input;
+  if (editing) return;
+  const number = input?.value || "";
+  const scroll = panel.querySelector(".goose-frame-list")?.scrollTop || 0;
+  panel.dataset.renderKey = html;
+  panel.innerHTML = html;
+  $("#goose-frame-number").value = number;
+  panel.querySelector(".goose-frame-list").scrollTop = scroll;
+  panel.querySelectorAll("[data-goose-frame]").forEach(button => button.addEventListener("click", () => openGooseFrame(Number(button.dataset.gooseFrame))));
+  $("#goose-frame-open").addEventListener("click", () => openGooseFrame(Number($("#goose-frame-number").value)));
+  $("#goose-frame-number").addEventListener("keydown", event => {
+    if (event.key === "Enter") openGooseFrame(Number(event.target.value));
+  });
+  $("#goose-older").addEventListener("click", () => loadGoosePage(page.oldest_frame));
+  $("#goose-latest").addEventListener("click", () => {state.gooseBefore = null; state.goosePage = null; state.gooseRequest++; renderGooseCapture(state.systemData);});
+}
+
+async function loadGoosePage(before) {
+  const runId = state.runId, request = ++state.gooseRequest;
+  const response = await api("GET", `/api/runs/${runId}/views?view=goose&before_frame=${before}`);
+  if (runId !== state.runId || request !== state.gooseRequest) return;
+  if (response.error || response.data?.error) { setStatus(response.error || response.data.error, true); return; }
+  state.gooseBefore = before;
+  state.goosePage = response.data;
+  renderGooseCapture(state.systemData);
+}
+
+async function openGooseFrame(number) {
+  if (!Number.isInteger(number) || number < 1) { showPacketToast("请输入已回放的帧号"); return; }
+  const runId = state.runId, request = ++state.gooseDetailRequest;
+  const response = await api("GET", `/api/runs/${runId}/views?view=goose&frame_no=${number}`);
+  if (runId !== state.runId || request !== state.gooseDetailRequest) return;
+  const capture = response.data, frame = capture?.frame;
+  if (!frame) { showPacketToast(response.error || capture?.error || "无法读取该帧"); return; }
+  const record = frame.record, goose = record.goose;
+  $("#packet-inspector-title").textContent = `GOOSE 报文 · 第 ${frame.frame_no} 帧`;
+  $(".packet-inspector-kicker").textContent = "PCAP 离线回放 / 原始帧";
+  $(".packet-inspector-notice").textContent = "合成样本。trip 是报文字段，不能据此断定终端已接受或断路器已动作。";
+  const fields = [["相对采集时间", `${(frame.time_us / 1000000).toFixed(6)} s`], ["原始采集时间", frame.capture_time_iso],
+    ["源 MAC", record.src_mac], ["目的 MAC", record.dst_mac], ["EtherType", "0x88B8"],
+    ["APPID", `0x${record.appid.toString(16)}`], ["VLAN / PCP", `${record.vlan?.vid ?? '—'} / ${record.vlan?.pcp ?? '—'}`],
+    ["stNum / sqNum", `${goose.stNum} / ${goose.sqNum}`], ["生存时间", `${goose.timeAllowedtoLive} ms`],
+    ["结构解析", record.parse_status], ["控制块", goose.gocbRef], ["参考提示", frame.checks.join("；") || "无"]];
+  $("#packet-inspector-body").innerHTML = `<div class="packet-field-list">${fields.map(([label, value]) => `<div class="packet-field"><span class="packet-field-label">${esc(label)}</span><code class="packet-field-value">${esc(value)}</code></div>`).join("")}</div>
+    <div class="packet-payload-title">数据集值（来源于报文）</div><div class="packet-field-list">${capture.dataset_definition.map((definition, i) => `<div class="packet-field"><span class="packet-field-label">${esc(definition.name)}</span><code class="packet-field-value">${esc(JSON.stringify(record.dataset[i]?.[0]))}</code></div>`).join("")}</div>
+    <details class="packet-payload-section"><summary>原始帧字节 · ${record.frame_length} B</summary><pre class="packet-payload-json">${esc(frame.raw_hex)}</pre></details>
+    <details class="packet-payload-section"><summary>完整通信日志 JSON</summary><pre class="packet-payload-json">${esc(JSON.stringify(record, null, 2))}</pre></details>`;
+  const inspector = $("#packet-inspector");
+  inspector.dataset.rawJson = JSON.stringify(frame, null, 2);
+  $("#packet-inspector-copy-status").textContent = "";
+  state.selectedPacketMessageId = null;
+  syncPacketSelection();
+  inspector.classList.add("open");
+  inspector.setAttribute("aria-hidden", "false");
+  document.body.classList.add("packet-inspector-open");
+  $("#packet-inspector-close").focus();
 }
 
 function selectCyberDemoPhase(index) {
@@ -1399,7 +1516,7 @@ function renderNetworkInspector(data) {
       const origin = raw.data_origin === "synthetic" ? "合成数据" : raw.data_origin || "来源未标明";
       return `<div class="ids-event"><strong>${esc(record.alert_type || record.event_type || 'IDS 事件')}</strong>
         <small>${esc(raw.observed_at || raw.timestamp || formatUs(event.received_time_us))} · ${esc(origin)}</small>
-        <div>${esc(record.protocol || '协议未提供')}${record.severity !== undefined ? ` · 原始等级 ${esc(record.severity)}` : ''}</div>
+        <div>${esc(record.protocol || '协议未提供')}${record.packet_count !== undefined ? ` · ${esc(record.packet_count)} 帧` : ''}${record.severity !== undefined ? ` · 原始等级 ${esc(record.severity)}` : ''}</div>
         <div class="ids-targets">${targets.map(id => `<button type="button" data-ids-target="${esc(id)}">${esc(deviceName(id))}</button>`).join("")}</div>
         <small>事件 ${esc(event.event_id || raw.event_id)}</small></div>`;
     }).join("");
@@ -1448,7 +1565,7 @@ function renderTopology(data) {
     state.selectedDeviceId = null;
     state.viewTouched = false; // 切换场景时重新自动铺满并居中
     state.pan = { x: 0, y: 0 };
-    state.selectedNetworkAsset = "ids-station";
+    state.selectedNetworkAsset = topo.layout?.packet_replay ? "ids-process" : "ids-station";
     $("#topo-network-assets").removeAttribute("data-render-key");
     particleMap.clear();
     packetMessageMap.clear();

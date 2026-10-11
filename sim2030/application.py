@@ -22,6 +22,7 @@ from sim2030.evaluation import Evaluator
 from sim2030.recognition.engine import DEFAULT_DETECTORS, RecognitionEngine
 from sim2030.records import RunReader, RunRecorder
 from sim2030.scenario import load_scenario, validate_scenario
+from sim2030.goose_capture import GooseCapture
 
 STATUS_READY = "ready"
 STATUS_RUNNING = "running"
@@ -48,6 +49,7 @@ class Application:
         self.engine = SimulationEngine()
         self.recorder: Optional[RunRecorder] = None
         self.current_time_us: int = 0
+        self.goose_capture = None
         self.dt_us: int = 100000
         self.duration_us: int = 0
         self._device_ids: set = set()
@@ -80,6 +82,16 @@ class Application:
         if errors:
             raise ValueError("场景校验失败：\n- " + "\n- ".join(errors))
 
+        capture = None
+        if config.layout.get("packet_replay"):
+            folder = config.observations.get("provider_dir")
+            if not folder:
+                raise ValueError("GOOSE 回放未配置样本目录")
+            try:
+                capture = GooseCapture(folder)
+            except FileNotFoundError as exc:
+                raise ValueError("GOOSE 样本尚未导入，请先运行 tools/import_message_core.py") from exc
+
         self._close_recorder()
         self.config = config
         simulation = config.simulation
@@ -99,6 +111,9 @@ class Application:
         self._defense_enabled = bool(defense_cfg.get("enabled", False))
 
         observation_cfg = dict(config.observations or {})
+        self.goose_capture = capture
+        if capture is not None:
+            observation_cfg["time_mapping"] = {"origin": capture.meta["base_time_iso"], "unit": "us"}
         self._observation_window_size_us = int(
             observation_cfg.get("window_size_us", recognition_cfg.get("window_size_us", 1_000_000))
         )
@@ -362,6 +377,10 @@ class Application:
             return {"management": self.engine.get_management(target_ids)}
         if view_name == "system":
             return self._system_view()
+        if view_name == "goose":
+            if self.goose_capture is None:
+                return {"available": False, "reason": "本场景未配置 GOOSE 报文回放"}
+            return self.goose_capture.view(self.current_time_us - self.dt_us, **query)
         if view_name == "timeline":
             return self._timeline_view()
         if view_name == "observations":
@@ -638,6 +657,7 @@ class Application:
                 "links": [asdict(link) for link in (config.links if config else [])],
                 "layout": (config.layout if config else {}),
             },
+            "packet_capture": self.goose_capture.view(self.current_time_us - self.dt_us) if self.goose_capture else None,
             "management": self.engine.get_management(sorted(self._device_ids)),
             "observations": self._observation_view().get("observations", {}),
             "recognition": [asdict(r) for r in (self.recognition_engine.last_results() if self.recognition_engine else [])],

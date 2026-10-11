@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from sim2030.records import RunReader
 from sim2030.contracts import event_key
+from sim2030.goose_capture import GooseCapture
 
 
 def _reader(records) -> RunReader:
@@ -107,6 +108,7 @@ def build_system_view(records) -> Dict[str, Any]:
         "management": device_snapshots,
         "environment": environment,
         "in_flight_messages": _derive_in_flight_messages(reader),
+        "packet_capture": build_goose_view(reader) if manifest.get("layout", {}).get("packet_replay") else None,
         "observations": {
             "event_count": len(events),
             "by_source": by_source,
@@ -120,6 +122,19 @@ def build_system_view(records) -> Dict[str, Any]:
         "recognition": reader.read("recognition"),
         "defense": reader.read("defense"),
     }
+
+
+def build_goose_view(records, query=None):
+    reader = _reader(records)
+    manifest = reader.manifest()
+    if not manifest.get("layout", {}).get("packet_replay"):
+        return {"available": False}
+    try:
+        capture = GooseCapture(manifest["observation_base_dir"])
+        snapshot = _last_truth_snapshot(reader)
+        return capture.view(snapshot.get("time_us", -1), **(query or {}))
+    except (OSError, ValueError) as exc:
+        return {"available": False, "reason": str(exc)}
 
 
 def _topology_devices(manifest: Dict[str, Any], device_snapshots: Dict[str, Any]) -> List[Dict[str, Any]]:

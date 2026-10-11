@@ -99,11 +99,28 @@ class TestGateway(unittest.TestCase):
         self.assertEqual(window.missing, [])
         self.assertEqual(window.late, [])
 
-        # 时间已过窗口，应列为迟到。
+        # 新收到的旧事件为迟到；之前已按时收到的 valid 只属于历史数据。
         gateway.ingest([make_observation_event(event_id="e-late", observed_at="2026-09-09T00:00:00Z")], 5_000_000)
         window = gateway.window(4_000_000, 5_000_000)
         self.assertEqual(window.events, [])
-        self.assertEqual(len(window.late), 2)
+        self.assertEqual(len(window.late), 1)
+        self.assertIn("e-late", window.late[0]["event_key"])
+
+    def test_expired_on_time_events_are_not_late(self):
+        gateway = ObservationGateway({"time_mapping": {"origin": "2026-09-09T00:00:00Z"}})
+        gateway.ingest([make_observation_event(observed_at="2026-09-09T00:00:00Z")], 0)
+        window = gateway.window(4_000_000, 5_000_000)
+        self.assertEqual(window.events, [])
+        self.assertEqual(window.late, [])
+
+    def test_window_does_not_use_events_received_in_the_future(self):
+        gateway = ObservationGateway({"time_mapping": {"origin": "2026-09-09T00:00:00Z"},
+                                      "expected_sources": [{"provider_id": "p-business", "source_type": "business"}]})
+        gateway.ingest([make_observation_event(observed_at="2026-09-09T00:00:00Z")], 5_000_000)
+        window = gateway.window(0, 1_000_000)
+        self.assertEqual(window.events, [])
+        self.assertEqual(window.late, [])
+        self.assertEqual(len(window.missing), 1)
 
     def test_missing_expected_source(self):
         gateway = ObservationGateway({"expected_sources": [{"provider_id": "p-missing", "source_type": "em"}]})

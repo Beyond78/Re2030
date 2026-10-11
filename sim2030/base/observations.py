@@ -336,6 +336,8 @@ class ObservationGateway:
         for key, event in self._events.items():
             if source_types and event.source_type not in source_types:
                 continue
+            if event.received_time_us > end_us:
+                continue
             association = self._associations.get(key, {})
             associations[key] = association
             scene_time_us = association.get("scene_time_us")
@@ -344,7 +346,8 @@ class ObservationGateway:
                 continue
             if start_us <= scene_time_us <= end_us:
                 events.append(event)
-            elif scene_time_us < start_us:
+            elif scene_time_us < start_us <= event.received_time_us:
+                # 已按时收到、后来移出窗口的数据不是迟到；只统计本窗口内补到的旧事件。
                 late.append({"event_key": key, "scene_time_us": scene_time_us, "source_type": event.source_type})
         missing = self._missing(start_us, end_us, source_types)
         return ObservationBatch(
@@ -362,7 +365,7 @@ class ObservationGateway:
         for event in self._events.values():
             association = self._associations.get(event.key(), {})
             scene_time_us = association.get("scene_time_us")
-            if scene_time_us is not None and start_us <= scene_time_us <= end_us:
+            if scene_time_us is not None and event.received_time_us <= end_us and start_us <= scene_time_us <= end_us:
                 present.add((event.provider_id, event.source_type))
         for expected in self._expected:
             provider_id = expected.get("provider_id", "")

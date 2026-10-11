@@ -91,6 +91,29 @@
 .cyber-demo-mark.source rect { stroke: #fb7185; }
 .cyber-demo-mark text, .cyber-demo-path-label { fill: #fbbf24; font-size: 10px; font-weight: 600; paint-order: stroke; stroke: #091322; stroke-width: 3px; }
 .cyber-demo-mark.source text { fill: #fda4af; }
+.scenario-list li[aria-disabled="true"] { opacity: .55; cursor: default; }
+.scenario-unavailable { display: block; margin-top: 4px; color: #fbbf24; font-size: 10px; }
+.goose-capture-summary { border: 1px solid #24536b; background: #0e2431; border-radius: 7px; padding: 10px; margin: 12px 0; }
+.capture-title { color: #7dd3fc; font-size: 12px; font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
+.capture-title span { font-size: 10px; color: #fbbf24; font-weight: 400; }
+.goose-capture-summary p { margin: 8px 0; font-size: 11px; line-height: 1.6; }
+.capture-muted, .capture-brief { color: #92a8bf; font-size: 10px; line-height: 1.7; margin: 6px 0; }
+.capture-notice { color: #c5d5e6; font-size: 10px; line-height: 1.7; padding: 7px; background: rgba(38, 73, 93, .3); border-radius: 4px; }
+.goose-frame-panel { border-bottom: 1px solid #24536b; padding-bottom: 14px; margin-bottom: 16px; }
+.capture-checks { border-left: 2px solid #b38a46; padding: 6px 8px; margin: 9px 0; color: #b6c6d8; font-size: 10px; line-height: 1.7; background: #1a2333; }
+.capture-checks b { color: #fde68a; font-weight: 500; }
+.capture-checks small { color: #879db4; font-size: 10px; }
+.capture-warning { color: #fbbf24; }
+.goose-frame-list { max-height: 290px; overflow: auto; }
+.goose-frame-list table { width: 100%; border-collapse: collapse; font: 10px Consolas, 'Microsoft YaHei', sans-serif; }
+.goose-frame-list th { color: #8ba8c1; text-align: left; position: sticky; top: 0; background: #102036; }
+.goose-frame-list td, .goose-frame-list th { padding: 5px 3px; border-bottom: 1px solid #213247; }
+.goose-frame-list small { display: block; color: #8298b1; font-size: 9px; }
+.goose-frame-list button { border: 0; background: transparent; color: #7dd3fc; cursor: pointer; text-decoration: underline; font: inherit; padding: 2px 0; }
+.goose-frame-list .has-check { background: #30251d; color: #fcd68d; }
+.capture-pagination, .capture-jump { display: flex; gap: 6px; margin-top: 8px; }
+.capture-pagination .btn, .capture-jump .btn { flex: 1; font-size: 11px; padding: 6px; white-space: nowrap; }
+.capture-jump input { flex: 2; width: 0; min-width: 0; background: #132238; border: 1px solid #334b68; color: #dbeafe; border-radius: 4px; padding: 5px 7px; }
 .topo-zoom-controls { position: absolute; left: 10px; top: 8px; display: flex; gap: 4px; z-index: 5; }
 .topo-zoom-controls button { font-size: 15px; padding: 3px 9px; }
 

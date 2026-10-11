@@ -166,6 +166,11 @@ class PresentationServer:
                 continue
             try:
                 config = load_scenario(path)
+                capture_dir = (config.observations or {}).get("provider_dir", "")
+                data_available = not config.layout.get("packet_replay") or all(
+                    os.path.isfile(os.path.join(capture_dir, name))
+                    for name in ("events.jsonl", "capture-index.json", "capture.pcap", "communication-log.jsonl", "manifest.json")
+                )
                 scenarios.append({
                     "scenario_id": config.scenario_id,
                     "name": config.name,
@@ -175,6 +180,8 @@ class PresentationServer:
                     "defense_enabled": bool((config.defense or {}).get("enabled")),
                     "device_count": len(config.devices),
                     "attack_count": len(config.attacks),
+                    "data_available": data_available,
+                    "unavailable_reason": "" if data_available else "请先导入 message_core.zip",
                 })
             except Exception:
                 continue
@@ -239,6 +246,12 @@ class PresentationServer:
 
     def _views(self, run_id: str, query: Dict[str, List[str]]) -> Tuple[int, Dict[str, Any], Dict[str, str]]:
         view_name = self._first(query, "view", "system")
+        goose_options = {}
+        if view_name == "goose":
+            try:
+                goose_options = {key: int(self._first(query, key, None)) for key in ("frame_no", "before_frame", "limit") if key in query}
+            except (ValueError, TypeError):
+                return 400, {"error": "报文查询参数必须是整数"}, _JSON_HEADERS
 
         # 快照视图必须真正按 time_us 读取历史记录，而不是返回当前状态。
         if view_name == "snapshot":
@@ -260,6 +273,8 @@ class PresentationServer:
             options: Dict[str, Any] = {}
             if "target_ids" in query:
                 options["target_ids"] = query["target_ids"]
+            if view_name == "goose":
+                options = goose_options
             data = self.application.get_view(view_name, options)
             if view_name == "evaluation":
                 data = self._evaluation_payload(data)
@@ -279,6 +294,10 @@ class PresentationServer:
                     "time_us": snapshot.get("time_us", 0) if snapshot else 0, "finished": True}
         if view_name == "system":
             return presentation_views.build_system_view(run_dir)
+        if view_name == "goose":
+            return presentation_views.build_goose_view(run_dir, {
+                key: int(self._first(query or {}, key, None)) for key in ("frame_no", "before_frame", "limit") if key in (query or {})
+            })
         if view_name == "timeline":
             return presentation_views.build_timeline(run_dir)
         if view_name == "observations":
