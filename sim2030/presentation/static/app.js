@@ -1073,7 +1073,7 @@ const LINK_TYPE_META = {
   measurement: { label: "采集接线", cls: "line-measurement", title: "传感器与采集单元之间的本地采集连接" },
   timing: { label: "专用对时", cls: "line-timing", title: "授时系统到采集单元的专用对时连接" },
   wireless: { label: "无线链路", cls: "line-wireless", title: "跨站与星地无线链路（授时卫星↔授时系统、其他电站↔站端监控）" },
-  interference: { label: "电磁干扰", cls: "line-interference", title: "电磁攻击节点对电流互感器的干扰耦合（红色虚线，手动触发）" },
+  interference: { label: "干扰耦合", cls: "line-interference", title: "攻击节点对目标设备的干扰/欺骗耦合（红色虚线，手动触发）" },
   hardwire: { label: "控制硬接线", cls: "line-hardwire", title: "控制接口至一次设备电磁线圈的硬接线控制回路" },
   electrical: { label: "电气主回路", cls: "line-elec", title: "一次主干回路高压电气主接线" },
   physical: { label: "热传导耦合", cls: "line-physical", title: "变压器本体热传导至油温计的物理接触测量关系" },
@@ -1479,6 +1479,10 @@ function getDeviceDynamicText(devId, mgmt, env) {
     return `[监视 收${rx} 发${tx}]`;
   }
   if (devId === "time_svc") {
+    if (s.sync_state === "spoofed") {
+      const offMs = s.timing_offset_us != null ? Math.round(Number(s.timing_offset_us) / 1000) : "";
+      return offMs !== "" ? `[授时被欺骗 +${offMs}ms]` : "[授时被欺骗]";
+    }
     return "[GNSS授时]";
   }
   if (devId === "gnss_sat" || devId === "peer_station") {

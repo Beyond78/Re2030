@@ -32,6 +32,8 @@ class ElectromagneticAttackNode(Device):
         self.target_asset_id: str = self.parameters.get("target_asset_id", "ct_current")
         self.reading_offset: float = float(self.parameters.get("reading_offset", 40.0))
         self.effect_type: str = self.parameters.get("effect_type", "reading_offset")
+        # 授时攻击等场景下攻击记录使用的类型名，默认电磁攻击。
+        self.attack_type: str = self.parameters.get("attack_type", "electromagnetic")
         self.frequency_mhz: float = float(self.parameters.get("frequency_mhz", 0.0))
         self.power_dbm: float = float(self.parameters.get("power_dbm", 0.0))
         self.state.setdefault("emitting", False)
@@ -57,11 +59,16 @@ class ElectromagneticAttackNode(Device):
         }]
 
     def build_effect_request(self, time_us: int) -> EffectRequest:
+        if self.effect_type == "timing_offset":
+            # 授时攻击：对目标设备时钟基准施加固定偏移（微秒），默认 100 ms。
+            parameters = {"offset_us": int(self.parameters.get("offset_us", 100_000))}
+        else:
+            parameters = {"offset": self.reading_offset}
         return EffectRequest(
             effect_id=self.effect_id,
             target_id=self.target_asset_id,
             effect_type=self.effect_type,
-            parameters={"offset": self.reading_offset},
+            parameters=parameters,
             start_time_us=int(time_us),
             end_time_us=self.HOLD_FOREVER_US,
         )

@@ -330,7 +330,7 @@ class Application:
             "type": "attack_submission",
             "attack_id": effect.effect_id,
             "effect_id": effect.effect_id,
-            "attack_type": "electromagnetic",
+            "attack_type": getattr(device, "attack_type", "electromagnetic"),
             "source_id": device.asset_id,
             "target_id": effect.target_id,
             "effect_type": effect.effect_type,

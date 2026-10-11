@@ -100,13 +100,23 @@ class TimeService(Device):
         self._next_sync_us: int = 0
 
     def time_signal(self, time_us: int) -> Dict[str, Any]:
-        return {"sync_time_us": time_us, "time_source": self.time_source, "sync_state": "synced"}
+        # 授时攻击（timing_offset 效果）期间，输出被欺骗的时钟基准。
+        offset_us = int(self._effect("timing_offset_us", 0) or 0)
+        return {
+            "sync_time_us": int(time_us) + offset_us,
+            "time_source": self.time_source,
+            "sync_state": "synced" if offset_us == 0 else "spoofed",
+            "timing_offset_us": offset_us,
+        }
 
     def step(self, time_us: int, dt_us: int, inputs: Dict[str, Any]) -> List[Message]:
         self._drain_inbox()
         messages = self._drain_outbox()
+        signal = self.time_signal(time_us)
+        self.state["sync_state"] = signal["sync_state"]
+        self.state["timing_offset_us"] = signal["timing_offset_us"]
         if time_us < self._next_sync_us:
             return messages
         self._next_sync_us = time_us + self.sync_interval_us
-        messages.extend(self._new_message(self.sync_port, BusinessType.SYNC, self.time_signal(time_us), time_us))
+        messages.extend(self._new_message(self.sync_port, BusinessType.SYNC, signal, time_us))
         return messages

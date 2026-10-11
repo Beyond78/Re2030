@@ -163,7 +163,8 @@ class PresentationServer:
         self._refresh_scenario_paths()
         scenarios: List[Dict[str, Any]] = []
         for scenario_id, path in sorted(self._scenario_paths.items()):
-            if scenario_id == "substation-attack-demo" or ("substation-goose-lab" in self._scenario_paths and scenario_id in {"substation-goose-normal", "substation-goose-forgery", "substation-goose-suppression", "substation-goose-dos"}):
+            hidden_scenarios = {"substation-attack-demo", "substation-network-attack"}
+            if scenario_id in hidden_scenarios or ("substation-goose-lab" in self._scenario_paths and scenario_id in {"substation-goose-normal", "substation-goose-forgery", "substation-goose-suppression", "substation-goose-dos"}):
                 continue
             try:
                 config = load_scenario(path)
