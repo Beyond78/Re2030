@@ -49,7 +49,7 @@ D:\python\python.exe main.py --ui --scenario scenarios/substation-live.json --ou
 资料依据与实现范围见 [网络攻击展示场景依据](docs/网络攻击展示场景依据.md)。
 
 GOOSE 报文回放需先导入本地交付包：`python tools/import_message_core.py "路径/message_core.zip"`。
-导入后选择左侧的“GOOSE 回放”场景，启动或单步推进，在右侧点击帧号查看原始字段和字节。
+导入后选择“GOOSE 网络攻击 · 接收与设备响应”，在同一入口切换样本、接收策略和处理能力。 点击红色过程网交换机，再点“下发攻击报文”，每次手动发送一帧红色报文，也可设置批量数量并下发洪泛流量。点击断路器智能终端可修改队列容量、处理速率及入口过滤，并查看逐帧接收结果。右侧展示设备后果、队列、曲线及逐帧判定，底部时间线可追溯到原始帧。模型条件和局限见接入说明。
 原始数据和标签保存在 Git 忽略的 `data/message_core/`，接入说明见 [GOOSE 报文接入](docs/GOOSE报文接入.md)。
 
 演示平面提供以下最小接口：

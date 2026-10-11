@@ -242,6 +242,11 @@ class SimulationEngine:
         result.network_state = self._network.snapshot()
         return result
 
+    def refresh_environment(self, time_us: int, dt_us: int) -> None:
+        """动作完成后同步共享物理量，供接收实验记录同一时刻的设备和线路状态。"""
+        outputs = {did: d.physical_outputs() for did, d in self._devices.items() if hasattr(d, "physical_outputs")}
+        self._environment.update(time_us, dt_us, outputs)
+
     def _build_inputs(self, device: Device) -> Dict[str, Any]:
         inputs = dict(self._environment.inputs_for(device.asset_id))
         source_id = self._physical_coupling.get(device.asset_id)

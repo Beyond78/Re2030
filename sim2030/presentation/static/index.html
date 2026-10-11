@@ -65,6 +65,15 @@
 
       <div class="section-title">仿真场景列表</div>
       <ul id="scenario-list" class="scenario-list"></ul>
+      <section id="goose-lab-options" class="goose-lab-options" aria-label="网络攻击实验设置" hidden>
+        <label for="goose-lab-sample">报文场景</label>
+        <select id="goose-lab-sample" class="form-select">
+          <option value="normal">正常对照 · 合法跳闸</option>
+          <option value="forgery" selected>报文伪造 · 误跳闸风险</option>
+          <option value="dos">DoS · 接收拥塞风险</option>
+        </select>
+        <p class="capture-muted">选择样本后加载；接收配置请点击智能终端。</p>
+      </section>
       <button id="create-run" class="btn btn-primary btn-block" disabled>加载并创建运行</button>
 
       <div class="run-meta-box">
@@ -225,12 +234,15 @@
 
           <!-- 拓扑设备节点图层 -->
           <g id="topo-cyber-demo" aria-label="网络攻击演示路径"></g>
+          <g id="topo-goose-path" aria-label="模拟终端接收路径"></g>
           <g id="topo-nodes" class="topo-nodes-layer"></g>
           <!-- 交换机、镜像口与安全监测设备 -->
           <g id="topo-network-assets"></g>
         </svg>
         </div>
       </div>
+
+      <section id="goose-lab-timeline" class="goose-lab-timeline" aria-label="报文到设备的事件时间线" hidden></section>
 
       <!-- 其它TAB视图的展示容器 -->
       <div id="sub-view-container" class="sub-view-container" style="display:none;">
@@ -240,6 +252,24 @@
 
     <!-- 右侧：常态监控详情与动态事件 -->
     <aside class="panel side-panel right-panel">
+      <section id="goose-receiver-panel" class="goose-receiver-panel" aria-label="断路器智能终端接收详情" hidden>
+        <div class="panel-header"><h2>断路器智能终端</h2></div>
+        <form id="receiver-settings" class="receiver-settings">
+          <label for="receiver-capacity">队列容量（帧）</label>
+          <input id="receiver-capacity" type="number" min="1" max="4096" step="1" required>
+          <label for="receiver-rate">处理速率（帧/秒）</label>
+          <input id="receiver-rate" type="number" min="10" max="50000" step="1" required>
+          <label class="receiver-check"><input id="receiver-filter" type="checkbox">启用入口过滤</label>
+          <button type="submit" id="receiver-apply" class="btn btn-primary">应用接收配置</button>
+          <p id="receiver-config-notice" class="capture-muted" role="status"></p>
+          <small>过滤只作用于新到达帧；已入队帧按原计划处理。</small>
+        </form>
+        <div id="receiver-live"></div>
+        <h3 class="receiver-list-title">处理记录</h3>
+        <div id="receiver-history" class="receiver-frame-list"></div>
+        <div class="capture-pagination"><button type="button" id="receiver-older" class="btn btn-secondary">较早记录</button><button type="button" id="receiver-latest" class="btn btn-secondary">最新记录</button></div>
+      </section>
+      <section id="goose-lab-result" class="goose-lab-result" aria-label="GOOSE 实验结果" hidden></section>
       <section id="goose-frame-panel" class="goose-frame-panel" aria-label="GOOSE 报文列表" hidden></section>
       <section id="cyber-demo-detail" class="cyber-demo-detail" aria-label="攻击情景说明" hidden></section>
       <section id="network-inspector" class="network-inspector" aria-label="网络安全监测">

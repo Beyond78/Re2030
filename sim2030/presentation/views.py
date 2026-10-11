@@ -108,6 +108,7 @@ def build_system_view(records) -> Dict[str, Any]:
         "management": device_snapshots,
         "environment": environment,
         "in_flight_messages": _derive_in_flight_messages(reader),
+        "goose_lab": snapshot.get("goose_lab"),
         "packet_capture": build_goose_view(reader) if manifest.get("layout", {}).get("packet_replay") else None,
         "observations": {
             "event_count": len(events),
@@ -132,9 +133,48 @@ def build_goose_view(records, query=None):
     try:
         capture = GooseCapture(manifest["observation_base_dir"])
         snapshot = _last_truth_snapshot(reader)
-        return capture.view(snapshot.get("time_us", -1), **(query or {}))
+        result = capture.view(snapshot.get("time_us", -1), **(query or {}))
+        if manifest.get("layout", {}).get("goose_lab"):
+            lab = snapshot.get("goose_lab") or {}
+            if lab.get("settings", {}).get("manual_dispatch"):
+                result["check_counts"] = lab.get("reference_check_counts", {})
+                result["peak_frames_1s"] = lab.get("peak_frames_1s", 0)
+            decisions = {r["frame_no"]: r for r in reader.read("goose") if r.get("type") == "decision" and r["time_us"] <= snapshot.get("time_us", -1)}
+            for frame in result.get("frames", []) + ([result["frame"]] if "frame" in result else []):
+                frame["receiver"] = decisions.get(frame["frame_no"], {"status": "queued", "reason": "等待接收处理"})
+        return result
     except (OSError, ValueError) as exc:
         return {"available": False, "reason": str(exc)}
+
+
+def build_receiver_view(records, query=None):
+    reader = _reader(records)
+    snapshot = _last_truth_snapshot(reader)
+    result = dict((snapshot.get("goose_lab") or {}).get("receiver") or {})
+    if not result:
+        return {"error": "此运行没有保存智能终端接收详情"}
+    query = query or {}
+    before, limit = query.get("before"), max(1, min(50, query.get("limit", 30)))
+    decisions = {r["frame_no"]: r for r in reader.read("goose")
+                 if r.get("type") == "decision" and r.get("arrival_order")
+                 and r["time_us"] <= snapshot["time_us"]}
+    rows = sorted((row for row in decisions.values() if before is None or row["arrival_order"] < before),
+                  key=lambda row: row["arrival_order"], reverse=True)
+    capture = GooseCapture(reader.manifest()["observation_base_dir"])
+    manual = {message.get("payload", {}).get("receiver_frame_no"): message
+              for message in reader.read("business") if message.get("business_type") == "goose_attack"}
+    displayed = []
+    for row in rows[:limit]:
+        number = row["frame_no"]
+        message = manual.get(number)
+        frame = message["payload"]["record"] if message else capture.records[number - 1]
+        displayed.append({**row, "label": f"下发 #{number - len(capture.records)}" if message else f"基线 #{number}",
+                          "source": "交换机" if message else "保护装置", "appid": frame["appid"],
+                          "stNum": frame["goose"]["stNum"], "sqNum": frame["goose"]["sqNum"],
+                          "trip": frame["dataset"][0][0]})
+    result.update(rows=displayed, has_older=len(rows) > limit,
+                  oldest_order=displayed[-1]["arrival_order"] if displayed else None)
+    return result
 
 
 def _topology_devices(manifest: Dict[str, Any], device_snapshots: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -184,6 +224,7 @@ def build_timeline(records) -> Dict[str, Any]:
         "recognitions": recognitions,
         "defenses": defenses,
         "business": business,
+        "goose_events": sorted((r for r in reader.read("goose") if r.get("type") == "event"), key=lambda event: event["time_us"]),
     }
 
 

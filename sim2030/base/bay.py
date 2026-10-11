@@ -73,6 +73,8 @@ class ProtectionDevice(Device):
     def step(self, time_us: int, dt_us: int, inputs: Dict[str, Any]) -> List[Message]:
         self._drain_inbox()
         messages = self._drain_outbox()
+        if self.parameters.get("external_trip_replay", False):
+            return messages
         if time_us < self._next_eval_us:
             return messages
         self._next_eval_us = time_us + self.eval_interval_us

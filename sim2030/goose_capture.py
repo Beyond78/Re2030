@@ -151,6 +151,9 @@ class GooseCapture:
         self.records = [json.loads(line) for line in (self.directory / "communication-log.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
         self.index = self.meta["frames"]
         self.times = [entry["time_us"] for entry in self.index]
+        # 交付样本的注入源，仅用于演示标色，不是 IDS 的判定规则。
+        self.attack_indices = [i for i, frame in enumerate(self.records)
+                               if self.meta["sample"] != "normal" and frame.get("src_mac") == "00:0c:29:66:00:66"]
         if len(self.index) != len(self.records):
             raise ValueError("回放索引与日志帧数不一致，请重新导入")
 
@@ -170,6 +173,15 @@ class GooseCapture:
                   "frames": [self._row(i) for i in range(start, end)][::-1],
                   "has_older": start > 0, "oldest_frame": start + 1 if end else None,
                   "outcome": "unknown", "pcap_verified": True}
+        if self.attack_indices:
+            arrived = [i for i in self.attack_indices if i < visible]
+            result["attack_visual"] = {
+                "source_mac": "00:0c:29:66:00:66", "total": len(self.attack_indices), "arrived": len(arrived),
+                "first_time_us": self.times[self.attack_indices[0]],
+                "last_time_us": self.times[self.attack_indices[-1]],
+                "destinations": sorted({self.records[i]["dst_mac"] for i in self.attack_indices}),
+                "frames": [self._row(i) for i in arrived[-8:]],
+            }
         if frame_no is not None:
             if not 1 <= frame_no <= visible:
                 return {"error": "该帧尚未回放或不存在"}
@@ -186,6 +198,8 @@ class GooseCapture:
         frame, point = self.records[index], self.index[index]
         dataset = frame.get("dataset", [])
         return {"frame_no": frame["frame_no"], "time_us": point["time_us"], "src_mac": frame["src_mac"],
+                "dst_mac": frame["dst_mac"], "appid": frame["appid"],
+                "is_attack_frame": self.meta["sample"] != "normal" and frame["src_mac"] == "00:0c:29:66:00:66",
                 "capture_time_iso": iso_time(epoch_us(self.manifest["base_time_utc"]) + point["time_us"]),
                 "stNum": frame["goose"].get("stNum"), "sqNum": frame["goose"].get("sqNum"),
                 "trip": dataset[0][0] if dataset and isinstance(dataset[0], list) else None,

@@ -66,6 +66,13 @@ class OperatingEnvironment:
         line_current_a = load_current_a if breaker_closed else 0.0
         active_power_mw = math.sqrt(3.0) * bus_voltage_kv * line_current_a / 1000.0
 
+        fault = self.config.get("fault", {})
+        start = fault.get("start_time_us")
+        fault_present = start is not None and time_us >= start
+        fault_active = fault_present and breaker_closed
+        if fault_active:
+            line_current_a = float(fault["current_a"])
+
         self._shared = {
             "bus_voltage_kv": bus_voltage_kv,
             "line_current_a": line_current_a,
@@ -74,6 +81,8 @@ class OperatingEnvironment:
             "ambient_temp_c": self.ambient_temp_c,
             "cooling_on": cooling_on,
         }
+        if fault:
+            self._shared.update(fault_present=fault_present, fault_active=fault_active)
 
     def inputs_for(self, asset_id: str) -> Dict[str, Any]:
         """给设备提供局部物理输入，不向算法暴露全局物理真值。"""

@@ -18,6 +18,7 @@ from sim2030.evaluation import Evaluator
 from sim2030.presentation import views as presentation_views
 from sim2030.records import RunReader
 from sim2030.scenario import load_scenario
+from sim2030.goose_capture import SAMPLES
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
@@ -162,7 +163,7 @@ class PresentationServer:
         self._refresh_scenario_paths()
         scenarios: List[Dict[str, Any]] = []
         for scenario_id, path in sorted(self._scenario_paths.items()):
-            if scenario_id == "substation-attack-demo":
+            if scenario_id == "substation-attack-demo" or ("substation-goose-lab" in self._scenario_paths and scenario_id in {"substation-goose-normal", "substation-goose-forgery", "substation-goose-suppression", "substation-goose-dos"}):
                 continue
             try:
                 config = load_scenario(path)
@@ -171,9 +172,16 @@ class PresentationServer:
                     os.path.isfile(os.path.join(capture_dir, name))
                     for name in ("events.jsonl", "capture-index.json", "capture.pcap", "communication-log.jsonl", "manifest.json")
                 )
+                sample_availability = {}
+                if config.layout.get("goose_lab"):
+                    for sample in SAMPLES:
+                        sample_availability[sample] = all(os.path.isfile(os.path.join(os.path.dirname(capture_dir), sample, name)) for name in ("events.jsonl", "capture-index.json", "capture.pcap", "communication-log.jsonl", "manifest.json"))
+                    data_available = any(sample_availability.values())
                 scenarios.append({
                     "scenario_id": config.scenario_id,
                     "name": config.name,
+                    "goose_lab": bool(config.layout.get("goose_lab")),
+                    "goose_samples": sample_availability,
                     "path": path,
                     "observation_mode": "file_replay",
                     "recognition_enabled": bool((config.recognition or {}).get("enabled")),
@@ -194,7 +202,10 @@ class PresentationServer:
         path = self._scenario_path_for(str(scenario_id))
         if path is None:
             return 404, {"error": f"未找到场景 {scenario_id}"}, _JSON_HEADERS
-        run_id = self.application.load(path)
+        try:
+            run_id = self.application.load(path, body.get("goose_options"))
+        except (ValueError, OSError) as exc:
+            return 400, {"error": str(exc)}, _JSON_HEADERS
         self._seen_request_ids.clear()
         return 201, {
             "run_id": run_id,
@@ -253,6 +264,15 @@ class PresentationServer:
             except (ValueError, TypeError):
                 return 400, {"error": "报文查询参数必须是整数"}, _JSON_HEADERS
 
+        receiver_options = {}
+        if view_name == "receiver":
+            try:
+                receiver_options = {key: int(self._first(query, key, None)) for key in ("before", "limit") if key in query}
+                if any(value <= 0 for value in receiver_options.values()):
+                    raise ValueError()
+            except (ValueError, TypeError):
+                return 400, {"error": "队列查询参数须为正整数"}, _JSON_HEADERS
+
         # 快照视图必须真正按 time_us 读取历史记录，而不是返回当前状态。
         if view_name == "snapshot":
             time_us = int(self._first(query, "time_us", 0) or 0)
@@ -275,6 +295,8 @@ class PresentationServer:
                 options["target_ids"] = query["target_ids"]
             if view_name == "goose":
                 options = goose_options
+            if view_name == "receiver":
+                options = receiver_options
             data = self.application.get_view(view_name, options)
             if view_name == "evaluation":
                 data = self._evaluation_payload(data)
@@ -298,6 +320,8 @@ class PresentationServer:
             return presentation_views.build_goose_view(run_dir, {
                 key: int(self._first(query or {}, key, None)) for key in ("frame_no", "before_frame", "limit") if key in (query or {})
             })
+        if view_name == "receiver":
+            return presentation_views.build_receiver_view(run_dir, {key: int(self._first(query or {}, key, None)) for key in ("before", "limit") if key in (query or {})})
         if view_name == "timeline":
             return presentation_views.build_timeline(run_dir)
         if view_name == "observations":

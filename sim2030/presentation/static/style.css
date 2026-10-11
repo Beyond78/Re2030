@@ -1807,3 +1807,73 @@ body.packet-inspector-open {
   .brand-text h1 { font-size: 13px; }
   .tab { padding: 7px; font-size: 11px; }
 }
+
+ .goose-receive-path { fill: none; stroke-width: 2.5; stroke-dasharray: 7 5; opacity: .85; }
+/* GOOSE 接收实验：设备结果与逐帧证据相邻，时间线留在拓扑下方。 */
+.goose-lab-options { padding: 10px; border: 1px solid #33465d; border-radius: 6px; margin-bottom: 10px; }
+.goose-lab-options label { display: block; margin: 6px 0; font-size: 11px; color: #b7c9dc; }
+.goose-lab-options select { width: 100%; padding: 7px 4px; font-size: 11px; }
+.goose-lab-options[hidden], .goose-lab-result[hidden], .goose-lab-timeline[hidden] { display: none; }
+.goose-lab-result { padding-bottom: 14px; margin-bottom: 12px; border-bottom: 1px solid #334155; }
+.goose-outcome { padding: 9px; margin-top: 9px; font-size: 13px; font-weight: 600; border-radius: 5px; border-left: 3px solid #34d399; background: #12382f; color: #a7f3d0; }
+.goose-outcome.warning { border-color: #fbbf24; background: #3b321e; color: #fde68a; }
+.goose-outcome.danger { border-color: #fb7185; background: #3c2334; color: #fda4af; }
+.goose-result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 10px 0; }
+.goose-result-grid > div { padding: 8px; border: 1px solid #2a3e54; border-radius: 5px; background: #101e2e; }
+.goose-result-grid small { display: block; font-size: 10px; color: #9bb1c9; margin-bottom: 4px; }
+.goose-result-grid b { font-size: 17px; color: #e2e8f0; }
+.goose-result-grid em { font: normal 10px sans-serif; color: #9bb1c9; }
+.goose-chart-label, .goose-queue-label { display: flex; justify-content: space-between; gap: 8px; color: #b6c7da; font-size: 11px; }
+.goose-history { display: block; width: 100%; height: 70px; margin-bottom: 8px; }
+.goose-history text { fill: #849db9; font-size: 9px; }
+.goose-lab-result meter { display: block; width: 100%; height: 15px; margin: 5px 0; accent-color: #38bdf8; }
+.goose-receiver-counts { display: flex; flex-wrap: wrap; gap: 5px 12px; font-size: 11px; color: #9bb1c9; margin-bottom: 8px; }
+.goose-receiver-counts b { color: #e2e8f0; }
+.goose-model-notes { font-size: 11px; color: #91a9c4; line-height: 1.6; }
+.goose-model-notes summary { cursor: pointer; color: #aac6e5; }
+.goose-model-notes p { margin: 6px 0; }
+.goose-lab-timeline { flex: 0 0 auto; border-top: 1px solid #334155; padding: 8px 12px; min-width: 0; }
+.goose-timeline-heading { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 11px; color: #c3d5e9; margin-bottom: 5px; }
+.goose-timeline-heading span { font-size: 10px; color: #91a9c4; }
+.goose-events { max-height: 110px; overflow-y: auto; }
+.goose-event { display: grid; grid-template-columns: 60px minmax(0,1fr) 42px; gap: 9px; padding: 5px 0; font-size: 11px; color: #b5c9df; border-bottom: 1px solid #223247; }
+.goose-event time { color: #7b96b5; font-family: Consolas, monospace; }
+.goose-event.breaker, .goose-event.fault, .goose-event.dropped { color: #fda4af; }
+.goose-event.command, .goose-event.accepted { color: #a7f3d0; }
+.goose-event button { color: #7dd3fc; border: 0; border-radius: 3px; background: #173550; cursor: pointer; }
+.topo-node.goose-device-impact rect { stroke: #fbbf24; stroke-width: 2; fill: #3b321e; }
+.topo-node.goose-device-fault rect { stroke: #fb7185; stroke-width: 2; fill: #3c2334; }
+@media (max-width: 1100px) { .goose-chart-pair { display: grid; grid-template-columns: 1fr; } }
+
+/* 被控交换机与攻击帧：颜色表示样本来源，不代替接收判定。 */
+.network-asset.goose-compromised > rect { fill: #401e2a; stroke: #fb7185; stroke-width: 2.5; }
+.network-asset.goose-compromised .network-name, .network-asset.goose-compromised .network-status { fill: #fda4af; }
+.send-attack-frame { background: #9f2946; border-color: #fb7185; color: #fff; margin: 8px 0; }
+.send-attack-frame:hover { background: #be3456; }
+.goose-frame-list tr.goose-attack-row td, .goose-frame-list tr.goose-attack-row button { color: #fda4af; }
+
+.goose-receiver-panel { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #334155; }
+.goose-receiver-panel[hidden] { display: none; }
+.receiver-settings { display: grid; grid-template-columns: 1fr 90px; gap: 8px; align-items: center; font-size: 11px; color: #b7c9dc; }
+.receiver-settings input[type=number], .attack-batch-controls input { background: #0c192a; border: 1px solid #415773; border-radius: 4px; padding: 7px; color: #e2e8f0; width: 100%; box-sizing: border-box; }
+.receiver-check, .receiver-settings button, .receiver-settings p, .receiver-settings small { grid-column: 1 / -1; }
+.receiver-check { display: flex; align-items: center; gap: 7px; margin: 4px 0; }
+.receiver-settings small, .attack-batch-controls small { color: #91a9c4; line-height: 1.6; }
+#receiver-live { margin-top: 14px; }
+#receiver-live meter { display: block; width: 100%; height: 16px; margin-top: 6px; }
+.receiver-list-title { font-size: 12px; color: #c4d7e9; margin: 12px 0 6px; }
+.receiver-frame-list { max-height: 230px; overflow: auto; }
+.receiver-frame-list.queue-list { max-height: 170px; }
+.receiver-row { border-left: 2px solid #52677d; padding: 7px; margin-bottom: 5px; background: #102033; font-size: 11px; color: #b7c9dc; overflow-wrap: anywhere; }
+.receiver-row > div { display: flex; justify-content: space-between; gap: 8px; }
+.receiver-row small { display: block; font-size: 10px; margin-top: 4px; color: #91a9c4; }
+.receiver-row p { margin: 4px 0 0; font-size: 10px; }
+.receiver-row.accepted { border-color: #34d399; }
+.receiver-row.accepted > div span { color: #34d399; }
+.receiver-row.dropped, .receiver-row.rejected, .receiver-row.stale { border-color: #fb7185; }
+.receiver-row.dropped > div span, .receiver-row.rejected > div span, .receiver-row.stale > div span { color: #fda4af; }
+.receiver-row.queued { border-color: #fbbf24; }
+.receiver-row.filtered { border-color: #c4b5fd; }
+.attack-batch-controls { padding: 9px 0; margin-bottom: 10px; border-bottom: 1px solid #334155; }
+.attack-batch-controls label { display: block; color: #b7c9dc; font-size: 11px; margin-bottom: 6px; }
+.attack-batch-controls small { display: block; font-size: 10px; }

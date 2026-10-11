@@ -23,6 +23,7 @@ from sim2030.recognition.engine import DEFAULT_DETECTORS, RecognitionEngine
 from sim2030.records import RunReader, RunRecorder
 from sim2030.scenario import load_scenario, validate_scenario
 from sim2030.goose_capture import GooseCapture
+from sim2030.goose_lab import GooseLab, configure_lab
 
 STATUS_READY = "ready"
 STATUS_RUNNING = "running"
@@ -50,6 +51,7 @@ class Application:
         self.recorder: Optional[RunRecorder] = None
         self.current_time_us: int = 0
         self.goose_capture = None
+        self.goose_lab = None
         self.dt_us: int = 100000
         self.duration_us: int = 0
         self._device_ids: set = set()
@@ -75,9 +77,10 @@ class Application:
     # ──────────────────────────────────────────────
     # 装载与控制
     # ──────────────────────────────────────────────
-    def load(self, config_path: str) -> str:
+    def load(self, config_path: str, goose_options=None) -> str:
         """校验场景、创建底座与记录目录，返回 run_id。"""
         config = load_scenario(config_path)
+        configure_lab(config, goose_options)
         errors = validate_scenario(config)
         if errors:
             raise ValueError("场景校验失败：\n- " + "\n- ".join(errors))
@@ -92,7 +95,9 @@ class Application:
             except FileNotFoundError as exc:
                 raise ValueError("GOOSE 样本尚未导入，请先运行 tools/import_message_core.py") from exc
 
+        lab = GooseLab(capture, config.layout["goose_lab"]) if capture and config.layout.get("goose_lab") else None
         self._close_recorder()
+        self.goose_lab = lab
         self.config = config
         simulation = config.simulation
         self.dt_us = int(simulation.get("dt_us", 100000))
@@ -119,6 +124,8 @@ class Application:
         )
 
         self.engine.build(config.devices, config.links, config.environment)
+        if self.goose_lab:
+            self.engine.refresh_environment(0, self.dt_us)
 
         self.config_path = os.path.abspath(config_path)
         base_dir = observation_cfg.get("base_dir") or observation_cfg.get("provider_dir") or observation_cfg.get("data_dir") or observation_cfg.get("path") or os.path.dirname(self.config_path)
@@ -209,6 +216,29 @@ class Application:
 
         if target_id == "run" or operation_type in ("start", "pause", "stop") or action_type in CONTROL_ACTIONS:
             return self._submit_control(request, request_id)
+
+        if target_id == "sw-process" and action_type in {"send_attack_frame", "send_attack_burst"}:
+            if self.goose_lab is None or self.status not in {STATUS_READY, STATUS_PAUSED, STATUS_RUNNING}:
+                return {"request_id": request_id, "status": "rejected", "reason": "请先加载可运行的 GOOSE 场景"}
+            parameters = request.get("parameters", {})
+            if not isinstance(parameters, dict):
+                return {"request_id": request_id, "status": "rejected", "reason": "parameters 必须是对象"}
+            count = parameters.get("count", 1000) if action_type == "send_attack_burst" else 1
+            receipt = self.goose_lab.dispatch(request_id, self.current_time_us, self.dt_us, count, action_type == "send_attack_burst")
+            if self.recorder and receipt["status"] == "accepted":
+                self.recorder.append_many("business", [{**message, "time_us": self.current_time_us} for message in self.goose_lab.drain_dispatch_messages()])
+                self.recorder.append_many("goose", self.goose_lab.drain_records())
+                self.recorder.flush()
+            return {"request_id": request_id, **receipt}
+
+        if target_id == "ctl_brk" and action_type == "configure_receiver":
+            if self.goose_lab is None or self.status not in {STATUS_READY, STATUS_RUNNING, STATUS_PAUSED}:
+                return {"request_id": request_id, "status": "rejected", "reason": "请先加载可运行的 GOOSE 场景"}
+            receipt = self.goose_lab.configure_receiver(request.get("parameters"), self.current_time_us)
+            if self.recorder:
+                self.recorder.append_many("goose", self.goose_lab.drain_records())
+                self.recorder.flush()
+            return {"request_id": request_id, **receipt}
 
         if target_id not in self._device_ids:
             return {"request_id": request_id, "status": "rejected", "reason": f"未知目标设备 {target_id}"}
@@ -317,7 +347,12 @@ class Application:
         self._submit_pending_defenses()
 
         # 2-3. 底座推进共享工况、消息投递与设备状态更新。
+        if self.goose_lab:
+            self.goose_lab.advance(self.current_time_us, self.engine)
         result = self.engine.step(self.current_time_us, self.dt_us)
+        if self.goose_lab:
+            self.engine.refresh_environment(self.current_time_us, self.dt_us)
+            self.goose_lab.observe(self.current_time_us, self.engine, result)
 
         # 4. 接入已交付的外部观测，形成识别窗口。
         ingest_batch, window = self._ingest_observations(self.current_time_us)
@@ -377,10 +412,12 @@ class Application:
             return {"management": self.engine.get_management(target_ids)}
         if view_name == "system":
             return self._system_view()
+        if view_name == "receiver":
+            return self.goose_lab.receiver_view(**query) if self.goose_lab else {"error": "当前场景没有接收实验"}
         if view_name == "goose":
             if self.goose_capture is None:
                 return {"available": False, "reason": "本场景未配置 GOOSE 报文回放"}
-            return self.goose_capture.view(self.current_time_us - self.dt_us, **query)
+            return self._goose_view(query)
         if view_name == "timeline":
             return self._timeline_view()
         if view_name == "observations":
@@ -464,7 +501,7 @@ class Application:
         self._pending_defense_requests = []
 
     def _ingest_observations(self, time_us: int):
-        raw = self.observation_source.read_available(time_us)
+        raw = self.goose_lab.observations(time_us) if self.goose_lab else self.observation_source.read_available(time_us)
         ingest_batch = self.observation_gateway.ingest(raw, time_us)
         window_start = max(0, time_us - self._observation_window_size_us)
         window = self.observation_gateway.window(window_start, time_us)
@@ -512,6 +549,8 @@ class Application:
         recorder = self.recorder
         if recorder is None:
             return
+        if self.goose_lab:
+            recorder.append_many("goose", self.goose_lab.drain_records())
         for message in result.messages:
             record = message.to_record()
             record["time_us"] = result.time_us
@@ -533,6 +572,7 @@ class Application:
                 "device_snapshots": result.device_snapshots,
                 "network_state": result.network_state,
                 "environment": environment,
+                "goose_lab": self.goose_lab.view(self.engine) if self.goose_lab else None,
             },
         )
 
@@ -598,7 +638,7 @@ class Application:
         """Return the complete in-flight internal messages for the packet inspector."""
         if self.engine is None or not hasattr(self.engine, "_network"):
             return []
-        return [item[2].to_record() for item in self.engine._network._queue]
+        return [item[2].to_record() for item in self.engine._network._queue] + (self.goose_lab.in_flight() if self.goose_lab else [])
 
     def _summary(self) -> Dict[str, Any]:
         # 提取在途报文流
@@ -623,6 +663,18 @@ class Application:
             "defense_count": len(self.defense_engine.actions()) if self.defense_engine else 0,
             "observation_count": len(self.observation_gateway._events),
         }
+
+    def _goose_view(self, query=None):
+        if self.goose_capture is None:
+            return None
+        result = self.goose_capture.view(self.current_time_us - self.dt_us, **(query or {}))
+        if self.goose_lab:
+            lab = self.goose_lab.view(self.engine)
+            result["check_counts"] = lab["reference_check_counts"]
+            result["peak_frames_1s"] = lab["peak_frames_1s"]
+            for frame in result.get("frames", []) + ([result["frame"]] if "frame" in result else []):
+                frame["receiver"] = dict(self.goose_lab.decisions.get(frame["frame_no"], {}))
+        return result
 
     def _system_view(self) -> Dict[str, Any]:
         config = self.config
@@ -657,7 +709,8 @@ class Application:
                 "links": [asdict(link) for link in (config.links if config else [])],
                 "layout": (config.layout if config else {}),
             },
-            "packet_capture": self.goose_capture.view(self.current_time_us - self.dt_us) if self.goose_capture else None,
+            "packet_capture": self._goose_view(),
+            "goose_lab": self.goose_lab.view(self.engine) if self.goose_lab else None,
             "management": self.engine.get_management(sorted(self._device_ids)),
             "observations": self._observation_view().get("observations", {}),
             "recognition": [asdict(r) for r in (self.recognition_engine.last_results() if self.recognition_engine else [])],
@@ -680,6 +733,7 @@ class Application:
             "time_us": self.current_time_us,
             "attacks": self._attack_truth_records(),
             "attack_submissions": self._attack_submission_records(),
+            "goose_events": sorted(self.goose_lab.events, key=lambda event: event["time_us"]) if self.goose_lab else [],
             "recognition": self._recognition_records(),
             "defense": self._defense_records(),
         }
