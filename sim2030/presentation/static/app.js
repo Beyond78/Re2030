@@ -1186,7 +1186,7 @@ function renderNetworkAssets(data) {
     }
     if (model.assets.length) {
       const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      label.setAttribute("x", "1040"); label.setAttribute("y", "150");
+      label.setAttribute("x", Math.min(...model.networks.map(n => n.probe.x))); label.setAttribute("y", "150");
       label.setAttribute("class", "monitoring-zone-title");
       label.textContent = "网络安全监测";
       group.appendChild(label);

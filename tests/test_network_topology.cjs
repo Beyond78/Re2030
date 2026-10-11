@@ -15,6 +15,20 @@ test('two isolated switches, two mirror feeds and independent reporting cables',
   assert.equal(model.cables.filter(c => c.kind === 'process').length, 6);
   assert.equal(model.routes.size, scene.links.length);
   assert.equal(model.cables.some(c => /gateway|bus/.test(c.id)), false);
+  const rightEdge = Math.max(...scene.layout.layers.map(layer => layer.x + layer.width));
+  const bands = Object.fromEntries(scene.layout.layers.map(layer => [layer.key, layer]));
+  for (const network of model.networks) {
+    assert.ok(network.switch.x > rightEdge, 'switch must sit outside all device layers');
+    assert.ok(network.probe.x > network.switch.x + network.switch.width);
+    const upper = bands[network.id === 'station' ? 'station' : 'bay'];
+    const lower = bands[network.id === 'station' ? 'bay' : 'process'];
+    for (const cable of model.cables.filter(c => c.kind === network.id)) {
+      const [bend, port] = cable.points.slice(1);
+      assert.equal(bend.y, port.y);
+      assert.ok(bend.y > upper.y + upper.height && bend.y < lower.y,
+        'horizontal access cables must stay between device layers');
+    }
+  }
 });
 
 test('physical measurements, timing and hardwire controls never enter either switch', () => {
@@ -28,8 +42,9 @@ test('packets enter only the intended switch and reverse along exactly the same 
   const request = { sender_id: 'station', receiver_id: 'mc', source_port: 'mc_breaker', target_port: 'up' };
   const points = topology.messageRoute(model, request);
   assert.deepEqual(points, model.routes.get('L-station-mc').points);
-  assert.ok(points.some(p => p.x === 891));
-  assert.ok(points.every(p => p.y < 410 && p.x < 1040));
+  const station = model.networks.find(n => n.id === 'station');
+  assert.ok(points.some(p => p.x === station.switch.x + station.switch.width / 2));
+  assert.ok(points.every(p => p.y < 410 && p.x < station.probe.x));
   const reverse = topology.messageRoute(model, { sender_id: 'mc', receiver_id: 'station', source_port: 'up', target_port: 'mc_breaker' });
   assert.deepEqual(reverse, [...points].reverse());
   assert.equal(topology.messageRoute(model, { ...request, source_port: 'invalid' }), null);

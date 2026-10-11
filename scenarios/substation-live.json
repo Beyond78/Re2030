@@ -688,7 +688,7 @@
       "x": 10,
       "y": 135,
       "width": 970,
-      "height": 160
+      "height": 80
     },
     {
       "key": "bay",
@@ -718,7 +718,7 @@
         "switch": {
           "id": "sw-station",
           "name": "站控网交换机",
-          "x": 820,
+          "x": 1015,
           "y": 220,
           "width": 142,
           "height": 64
@@ -726,7 +726,7 @@
         "probe": {
           "id": "ids-station",
           "name": "站控网 IDS",
-          "x": 1040,
+          "x": 1215,
           "y": 220,
           "width": 155,
           "height": 64,
@@ -782,7 +782,7 @@
         "switch": {
           "id": "sw-process",
           "name": "过程网交换机",
-          "x": 820,
+          "x": 1015,
           "y": 410,
           "width": 142,
           "height": 90
@@ -790,7 +790,7 @@
         "probe": {
           "id": "ids-process",
           "name": "过程网 IDS",
-          "x": 1040,
+          "x": 1215,
           "y": 410,
           "width": 155,
           "height": 64,
@@ -942,7 +942,7 @@
     "manager": {
       "id": "security-manager",
       "name": "安全监测平台",
-      "x": 1040,
+      "x": 1215,
       "y": 625,
       "width": 155,
       "height": 72
