@@ -116,12 +116,11 @@ async function main() {
       if (!li) return 'no scenario';
       li.click();
       await createRun();
-      await control('start');
-      for (let i = 0; i < ${args.steps}; i++) { await control('step'); await wait(25); }
+      for (let i = 0; i < ${args.steps}; i++) { await stepSimulation(); await wait(25); }
       if (${JSON.stringify(args.mode)} === 'attack') {
         await api('POST', '/api/runs/' + state.runId + '/operations',
           { request_id: 'shot-atk-' + Date.now(), target_asset_id: 'em_attack_node', action_type: 'start_attack' });
-        for (let i = 0; i < 5; i++) { await control('step'); await wait(25); }
+        for (let i = 0; i < 5; i++) { await stepSimulation(); await wait(25); }
       }
       await refreshViews();
       return JSON.stringify({

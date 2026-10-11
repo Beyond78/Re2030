@@ -213,13 +213,24 @@ class Application:
         action = request.get("operation_type") or request.get("action_type", "")
         if action in ("start", "start_run"):
             self.start()
-            return {"request_id": request_id, "status": "accepted", "action": "start"}
+            return {"request_id": request_id, "status": "accepted", "action": "start", "summary": self._summary()}
         if action in ("pause", "pause_run"):
             self.pause()
-            return {"request_id": request_id, "status": "accepted", "action": "pause"}
+            return {"request_id": request_id, "status": "accepted", "action": "pause", "summary": self._summary()}
         if action in ("stop", "stop_run"):
             self.stop()
-            return {"request_id": request_id, "status": "accepted", "action": "stop"}
+            return {"request_id": request_id, "status": "accepted", "action": "stop", "summary": self._summary()}
+        if action == "step_once":
+            if self.config is None or self.status not in (STATUS_READY, STATUS_PAUSED):
+                return {"request_id": request_id, "status": "rejected", "reason": "单步操作仅可在就绪或暂停时执行"}
+            self.start()
+            try:
+                self._step_locked()
+            finally:
+                if self.status == STATUS_RUNNING:
+                    self.status = STATUS_PAUSED
+            self._last_step_summary = self._summary()
+            return {"request_id": request_id, "status": "accepted", "action": "step_once", "summary": self._last_step_summary}
         if action == "step":
             summary = self._step_locked()
             return {"request_id": request_id, "status": "accepted", "action": "step", "summary": summary}
@@ -584,6 +595,7 @@ class Application:
             "in_flight_messages": in_flight_messages,
             "run_id": self.run_id,
             "status": self.status,
+            "dt_us": self.dt_us,
             "time_us": self.current_time_us,
             "duration_us": self.duration_us,
             "pending_operations": len(self._pending_operations),
@@ -620,6 +632,7 @@ class Application:
             "run_id": self.run_id,
             "status": self.status,
             "time_us": self.current_time_us,
+            "dt_us": self.dt_us,
             "topology": {
                 "devices": devices,
                 "links": [asdict(link) for link in (config.links if config else [])],

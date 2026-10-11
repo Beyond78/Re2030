@@ -115,7 +115,7 @@ body 示例：
 - `target_asset_id == "run"` 或 `action_type ∈ {start, pause, stop, step, start_run, pause_run, stop_run}` 走控制通道。
 - `start` / `pause` / `stop` 改变运行状态。
 - **`step`**：推进一个仿真步（调用 `Application.step()`），返回 `{"status":"accepted","action":"step","summary":{...}}`。
-  这是本仓库为演示页面新加的接口，用于前端“自动运行/步进”，否则 UI 只改状态、时间不前进。
+  自动推演使用 `step`，单步按钮使用 `step_once`；后者仅接受就绪或暂停状态，完成后保持暂停。开始、暂停、停止的回执包含权威状态 `summary`，`system` 视图额外提供 `dt_us`。
 - 其他 `target_asset_id` 走业务操作，进入 `_pending_operations`，在下一步边界执行。
 - 重复 `request_id` 返回 `{"status":"duplicate","previous":...}`，不会重复执行。
 
@@ -203,7 +203,7 @@ body 示例：
 3. **三行图例**：链路定义 / 节点状态 / 报文粒子；报文粒子按 `data`（采样/状态）与 `command`（命令）等大类过滤展示。
 4. **右侧监控详情**：常态展示站端监控系统与测控装置的最近接收、最近下发、最新采样、命令执行与执行反馈，面向人可读。
 5. **设备控制面板**：左侧不再固定下发业务操作，而是按所选设备的可控制项动态显示（例如保护装置阈值、断路器合闸）。
-6. **动态推演**：支持开始/暂停/停止、单步步进、自动推演（1s/步）、历史时刻快照回放。
+6. **动态推演**：开始与暂停共用一个按钮，开始后自动推进；速度可选 0.5、1、2、5、10 步/秒。就绪或暂停时可单步推进，支持停止及历史时刻快照查看。
 7. **tabs 保留**：`system/timeline/observations/recognition/defense/evaluation`。
 8. **版式随场景加载**：节点坐标取设备 `layout`（`{"x","y"}`），分层带取场景 `layout.layers`
    （`key/title/x/y/width/height`），画布 `viewBox` 由版式外接矩形推导（可用 `layout.canvas` 覆盖）；
@@ -254,6 +254,6 @@ body 示例：
   攻击为**演示平面手动触发**（点选攻击节点 → “开始攻击”/“结束攻击”，
   对应 `start_attack`/`stop_attack`），不再按时间自动触发；作用为对 `ct_current` 施加
   `reading_offset=+40A`，电流采样由约 115A 变为约 155A，结束攻击后恢复。
-- 活动运行的 `time_us` 只在调用 `step` 后前进；纯点“开始”不会自动推进，前端需打开“自动推演步进”或手动单步。
+- 活动运行的 `time_us` 由步进推进。前端点击“开始推演”会自动按所选速度串行调用 `step`；暂停／停止先停止调度并等待在途步骤完成。`step_once` 在就绪或暂停时原子推进一步，完成后保持暂停，到期则保持 finished。
 - 界面自检：`node tools/ui_screenshot.mjs --url http://127.0.0.1:8765/ --scenario <id> --mode attack|none --out shot.png`
   可无头启动 Edge/Chrome、自动创建运行并截图，脚本同时打印节点/链路/画布/图例/传感器读数用于核对。

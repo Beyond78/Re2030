@@ -96,6 +96,7 @@ def build_system_view(records) -> Dict[str, Any]:
         "run_id": manifest.get("run_id"),
         "scenario_id": manifest.get("scenario_id"),
         "status": "finished",
+        "dt_us": manifest.get("dt_us", 100000),
         "time_us": snapshot.get("time_us", 0),
         "topology": {
             "devices": devices,

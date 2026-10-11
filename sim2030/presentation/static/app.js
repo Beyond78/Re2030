@@ -9,7 +9,9 @@ const state = {
   systemData: null,
   selectedDeviceId: null,
   pollTimer: null,
-  autoStepTimer: null,
+  loadingRun: false,
+  pollRefreshing: false,
+  viewRequest: 0,
   renderedTopologyOnce: false,
   renderedRunId: null,
   particleFilter: "all",
@@ -202,7 +204,7 @@ async function loadScenarios() {
       state.selectedScenario = scenario.scenario_id;
       list.querySelectorAll("li").forEach((node) => node.classList.remove("selected"));
       li.classList.add("selected");
-      $("#create-run").disabled = false;
+      $("#create-run").disabled = state.loadingRun || simulationPlayer.busy;
     });
     list.appendChild(li);
   });
@@ -213,56 +215,91 @@ async function loadScenarios() {
   setStatus(`已就绪，发现场景 ${state.scenarios.length} 个`);
 }
 
-/* 创建运行 */
-async function createRun() {
-  if (!state.selectedScenario) return;
-  setStatus("正在创建仿真运行...");
-  const payload = await api("POST", "/api/runs", { scenario_id: state.selectedScenario });
-  if (payload.error) {
-    setStatus(payload.error, true);
-    return;
-  }
-  state.runId = payload.run_id;
-  state.renderedTopologyOnce = false;
-  $("#run-id").textContent = payload.run_id;
-  $("#run-id").title = payload.run_id;
-  setStatus(`运行已创建：${payload.run_id}`);
-
-  startPolling();
-  await refreshViews();
-}
-
-/* 运行控制 (start/pause/stop) */
-async function control(action) {
-  if (!state.runId) return;
-  const payload = await api("POST", `/api/runs/${state.runId}/operations`, {
-    request_id: `ctrl-${Date.now()}`,
+const PLAYBACK_RATES = [0.5, 1, 2, 5, 10];
+const simulationPlayer = new SimulationPlayer({
+  send: (action, runId) => api("POST", `/api/runs/${runId}/operations`, {
+    request_id: `play-${crypto.randomUUID()}`,
     target_asset_id: "run",
     operation_type: action,
-  });
-  if (payload.error) {
-    setStatus(`控制失败: ${payload.error}`, true);
-  } else {
-    setStatus(`已执行指令: ${action}`);
-  }
-  await refreshViews();
+  }),
+  onChange: (player) => {
+    renderPlaybackControls();
+    if (player.status === "finished" && !state.loadingRun) {
+      setStatus(player.error ? "本次运行已结束或被其他页面替换，请重新加载场景" : "本次推演已结束");
+    }
+  },
+  onError: (error) => setStatus(`推演已中断：${error.message}`, true),
+  onUpdate: async () => {
+    if (await refreshViews() === false) throw new Error("无法刷新运行状态，请检查连接后重试");
+  },
+});
+
+function renderPlaybackControls() {
+  const player = simulationPlayer;
+  const toggle = $("#btn-run-toggle");
+  const locked = state.loadingRun || player.busy;
+  toggle.disabled = !player.runId || locked || player.terminal;
+  toggle.textContent = locked ? "处理中…" : player.terminal ? "推演已结束" : player.running ? "❚❚ 暂停推演" :
+    player.status === "ready" || player.status === "idle" ? "▶ 开始推演" : "▶ 继续推演";
+  toggle.setAttribute("aria-pressed", String(player.running));
+  toggle.classList.toggle("is-running", player.running);
+  $("#btn-stop").disabled = !player.runId || locked || !["running", "paused"].includes(player.status);
+  $("#btn-single-step").disabled = !player.runId || locked || !["ready", "paused"].includes(player.status);
+  $("#btn-single-step").textContent = `单步推进 (+${player.dtUs / 1000}ms)`;
+  $("#create-run").disabled = !state.selectedScenario || locked;
+  $("#playback-rate-value").textContent = `${player.rate} 步/秒`;
+  $("#playback-rate").setAttribute("aria-valuetext", `每秒 ${player.rate} 步`);
+  $("#playback-speed-hint").textContent = `每步 ${player.dtUs / 1000}ms · 目标每秒推进 ${Number((player.rate * player.dtUs / 1000000).toFixed(3))} 秒`;
+  $("#playback-state-hint").textContent = !player.runId ? "加载场景后开始推演" : player.terminal ? "本次推演已结束，可重新加载场景" :
+    player.error ? "自动推进已中断，可继续重试" : player.running ? "按所选速度自动推进" :
+    player.status === "paused" ? "已暂停，可继续或单步查看" : "点击开始，按所选速度自动推进";
 }
 
-/* 单步推演 */
-async function stepSimulation() {
-  if (!state.runId) return;
-  const payload = await api("POST", `/api/runs/${state.runId}/operations`, {
-    request_id: `step-${Date.now()}`,
-    target_asset_id: "run",
-    operation_type: "step",
-  });
-  if (payload.error) {
-    setStatus(`步进错误: ${payload.error}`, true);
-  } else {
-    const timeUs = payload.summary?.time_us ?? state.systemData?.time_us;
-    setStatus(`步进成功：当前时刻 ${formatUs(timeUs)}`);
+/* 换场景前停止调度，等待在途步骤和暂停确认。 */
+async function createRun() {
+  if (!state.selectedScenario || state.loadingRun || simulationPlayer.busy) return;
+  state.loadingRun = true;
+  state.viewRequest++;
+  renderPlaybackControls();
+  const scenarioId = state.selectedScenario;
+  try {
+    if (simulationPlayer.status === "running") {
+      if (!await simulationPlayer.command("pause")) return;
+    }
+    setStatus("正在创建仿真运行...");
+    const payload = await api("POST", "/api/runs", { scenario_id: scenarioId });
+    if (payload.error) { setStatus(payload.error, true); return; }
+    state.runId = payload.run_id;
+    simulationPlayer.bind(payload.run_id, payload);
+    state.renderedTopologyOnce = false;
+    $("#run-id").textContent = payload.run_id;
+    $("#run-id").title = payload.run_id;
+    setStatus(`运行已创建：${payload.run_id}`);
+    startPolling();
+    await refreshViews();
+  } finally {
+    state.loadingRun = false;
+    renderPlaybackControls();
   }
-  await refreshViews();
+}
+
+async function control(action) {
+  if (state.loadingRun) return false;
+  const actualAction = action === "step" ? "step_once" : action;
+  const accepted = await simulationPlayer.command(actualAction);
+  if (accepted) {
+    const message = {start: "自动推演已开始", pause: "推演已暂停", stop: "本次推演已结束", step_once: "已推进一步，保持暂停"}[actualAction];
+    setStatus(simulationPlayer.terminal ? "本次推演已结束" : message || "操作已完成");
+  }
+  return accepted;
+}
+
+async function togglePlayback() {
+  await control(simulationPlayer.running ? "pause" : "start");
+}
+
+async function stepSimulation() {
+  await control("step_once");
 }
 
 /* 预定义设备中文名映射 */
@@ -517,61 +554,50 @@ async function seekReplay() {
   showSubView();
 }
 
-/* 轮询管理 */
+/* 自动运行由步进完成后刷新；空闲轮询不与自身重叠。 */
 function startPolling() {
   if (state.pollTimer) clearInterval(state.pollTimer);
   state.pollTimer = setInterval(async () => {
-    if (state.runId) {
-      await refreshViews();
-    }
+    if (!state.runId || state.loadingRun || simulationPlayer.running || simulationPlayer.busy || state.pollRefreshing) return;
+    state.pollRefreshing = true;
+    try { await refreshViews(); }
+    finally { state.pollRefreshing = false; }
   }, 1200);
 }
 
-function updateAutoStep(enable) {
-  if (state.autoStepTimer) {
-    clearInterval(state.autoStepTimer);
-    state.autoStepTimer = null;
-  }
-  if (enable) {
-    state.autoStepTimer = setInterval(async () => {
-      if (state.runId && state.systemData?.status === "running") {
-        await stepSimulation();
-      }
-    }, 1000);
-  }
-}
-
-/* 视图刷新入口 */
+/* 运行、视图或操作发生变化后，丢弃旧请求，防止迟到的响应恢复旧状态。 */
 async function refreshViews() {
   if (!state.runId) return;
-  const payload = await api("GET", `/api/runs/${state.runId}/views?view=${state.currentView}`);
-  const data = payload.data || {};
-
-  if (state.currentView === "system") {
+  const runId = state.runId, view = state.currentView;
+  const revision = simulationPlayer.revision, request = ++state.viewRequest;
+  const [payload, systemPayload] = await Promise.all([
+    api("GET", `/api/runs/${runId}/views?view=${view}`),
+    view === "system" ? Promise.resolve(null) : api("GET", `/api/runs/${runId}/views?view=system`),
+  ]);
+  if (runId !== state.runId || view !== state.currentView || request !== state.viewRequest || revision !== simulationPlayer.revision) return;
+  if (payload.error || systemPayload?.error) {
+    setStatus(payload.error || systemPayload.error, true);
+    return false;
+  }
+  const data = view === "system" ? payload.data : systemPayload.data;
+  const pausedStep = data.status === "paused" && data.run_id === state.systemData?.run_id && data.time_us !== state.systemData?.time_us;
+  state.systemData = data;
+  simulationPlayer.observe(data);
+  updateMetricsRibbon(data);
+  updateActualConditions(data);
+  updateMonitorPanel(data);
+  if (view === "system") {
     showTopoView();
-    state.systemData = data;
-    updateMetricsRibbon(data);
-    updateActualConditions(data);
     renderTopology(data);
-    updatePacketFlow(data);
+    updatePacketFlow(data, pausedStep);
     updateInterferenceFlow(data);
     updateAlertFeed(data);
-    updateMonitorPanel(data);
-    renderNetworkInspector(data);
   } else {
     showSubView();
-    renderOtherView(state.currentView, data);
-    // 异步拉取 system 数据仅用于更新顶部统计条与右侧监控面板
-    api("GET", `/api/runs/${state.runId}/views?view=system`).then((res) => {
-      if (res.data) {
-        state.systemData = res.data;
-        updateMetricsRibbon(res.data);
-        updateActualConditions(res.data);
-        updateMonitorPanel(res.data);
-        renderNetworkInspector(res.data);
-      }
-    });
+    renderOtherView(view, payload.data || {});
   }
+  renderNetworkInspector(data);
+  return true;
 }
 
 /* 更新顶部态势指标条 */
@@ -1514,8 +1540,8 @@ function animateParticles(now) {
   // 时钟只在运行中前进：暂停时针停住，报文圆点冻结在暂停那一刻的位置
   const delta = animLastFrame ? Math.min(now - animLastFrame, 200) : 0;
   animLastFrame = now;
-  const isRunning = state.systemData?.status === "running";
-  if (isRunning) animClock += delta;
+  const isRunning = state.systemData?.status === "running" && simulationPlayer.running;
+  if (isRunning) animClock += delta * simulationPlayer.rate;
   const clock = animClock;
 
   const packetLayer = $("#topo-packets");
@@ -1602,7 +1628,7 @@ if (!animFrameId) {
 }
 
 /* 增量差分更新报文流，保持老报文连续运动不被销毁重置 */
-function updatePacketFlow(data) {
+function updatePacketFlow(data, pausedStep = false) {
   // 系统终止/停止或回放结束：彻底清理在途报文粒子，杜绝幽灵粒子传递
   if (data.status === "finished" || data.status === "stopped") {
     particleMap.clear();
@@ -1613,7 +1639,12 @@ function updatePacketFlow(data) {
   }
 
   // 暂停时不增删报文粒子，保持暂停那一刻的画面，方便点击在途报文
-  if (data.status !== "running") return;
+  if (data.status !== "running" && !pausedStep) return;
+  if (pausedStep) {
+    particleMap.clear();
+    packetMessageMap.clear();
+    clearParticleNodes();
+  }
 
   const inFlights = data.in_flight_messages || [];
   const incomingIds = new Set();
@@ -1649,7 +1680,7 @@ function updatePacketFlow(data) {
       y2: dst.y + 24,
       businessType: msg.business_type || "unknown",
       category: particleCategory(msg.business_type || "unknown"),
-      birthTime: animClock,
+      birthTime: animClock - (pausedStep ? 550 : 0),
       duration: 1100, // 约1.1秒平滑穿越
       isDead: false,
     });
@@ -2134,9 +2165,11 @@ function bindEvents() {
   $("#btn-single-step").addEventListener("click", stepSimulation);
   $("#btn-refresh").addEventListener("click", refreshViews);
 
-  $("#auto-step-toggle").addEventListener("change", (e) => {
-    updateAutoStep(e.target.checked);
+  $("#btn-run-toggle").addEventListener("click", togglePlayback);
+  $("#playback-rate").addEventListener("input", event => {
+    simulationPlayer.setRate(PLAYBACK_RATES[Number(event.target.value)]);
   });
+  renderPlaybackControls();
 
   const packetLayer = $("#topo-packets");
   if (packetLayer) {

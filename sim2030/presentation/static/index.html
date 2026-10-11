@@ -74,20 +74,19 @@
         </div>
       </div>
 
-      <div class="section-title">推演控制步进</div>
+      <div class="section-title">推演控制</div>
       <div class="control-btn-group">
-        <button class="btn btn-control" data-action="start" id="btn-start" title="开始运行">▶ 开始</button>
-        <button class="btn btn-control" data-action="pause" id="btn-pause" title="暂停运行">❚❚ 暂停</button>
-        <button class="btn btn-control" data-action="stop" id="btn-stop" title="停止运行">⏹ 停止</button>
+        <button class="btn btn-control playback-toggle" id="btn-run-toggle" aria-pressed="false" disabled>▶ 开始推演</button>
+        <button class="btn btn-control" data-action="stop" id="btn-stop" title="结束本次推演" disabled>停止</button>
       </div>
 
       <div class="auto-driver-box">
-        <label class="toggle-control">
-          <input type="checkbox" id="auto-step-toggle">
-          <span class="toggle-slider"></span>
-          <span class="toggle-label">自动推演步进 (1s/步)</span>
-        </label>
-        <button class="btn btn-outline btn-block" id="btn-single-step">单步推演 (+100ms)</button>
+        <div class="playback-speed-label"><label for="playback-rate">推演速度</label><output id="playback-rate-value" for="playback-rate">1 步/秒</output></div>
+        <input type="range" id="playback-rate" min="0" max="4" step="1" value="1" aria-valuetext="每秒 1 步">
+        <div class="playback-speed-ticks" aria-hidden="true"><span>0.5</span><span>1</span><span>2</span><span>5</span><span>10</span></div>
+        <p id="playback-speed-hint" class="playback-hint">每步 100ms · 目标每秒推进 0.1 秒</p>
+        <button class="btn btn-outline btn-block" id="btn-single-step" disabled>单步推进 (+100ms)</button>
+        <p id="playback-state-hint" class="playback-hint" role="status">加载场景后开始推演</p>
       </div>
 
       <div class="section-title">设备控制面板</div>
@@ -275,6 +274,7 @@
   <div id="packet-inspector-toast" class="packet-inspector-toast" role="status" aria-live="polite"></div>
 
   <script src="/network-topology.js?v=20261011"></script>
+  <script src="/simulation-player.js?v=20261011"></script>
   <script src="/app.js?v=20261011-layout2"></script>
 </body>
 </html>
