@@ -78,11 +78,18 @@ class GooseLab:
         self._observation_batch = []
         self._dispatched_messages = []
         self.dos_capture = None
-        dos_dir = capture.directory.parent / "dos"
+        self.suppression_capture = None
+        sample_dir = capture.directory.parent
+        dos_dir = sample_dir / "dos"
+        suppression_dir = sample_dir / "suppression"
         if capture.meta["sample"] == "dos":
             self.dos_capture = capture
         elif (dos_dir / "capture-index.json").is_file():
             self.dos_capture = GooseCapture(dos_dir)
+        if capture.meta["sample"] == "suppression":
+            self.suppression_capture = capture
+        elif (suppression_dir / "capture-index.json").is_file():
+            self.suppression_capture = GooseCapture(suppression_dir)
 
     def receive_control(self, message, now, engine):
         """将正常网络控制命令纳入同一 FIFO；不是把它伪装成原始 GOOSE 帧。"""
@@ -125,10 +132,16 @@ class GooseLab:
     def frame_record(self, number):
         return self.manual_frames[number]["record"] if number in self.manual_frames else self.capture.records[number - 1]
 
-    def dispatch(self, request_id, now, dt_us, count=1, flood=False):
+    def dispatch(self, request_id, now, dt_us, count=1, flood=False, suppression=False):
+        if suppression:
+            capture = self.suppression_capture
+            # 消息抑制模板固定发送样本内全部投毒帧（高 stNum 心跳及其重传）。
+            if capture is not None and capture.attack_indices:
+                count = len(capture.attack_indices)
+        else:
+            capture = self.dos_capture if flood else self.capture
         if type(count) is not int or not 1 <= count <= 5000:
             return {"status": "rejected", "reason": "每批数量必须是 1–5000 的整数"}
-        capture = self.dos_capture if flood else self.capture
         if capture is None or not capture.attack_indices:
             return {"status": "rejected", "reason": "未导入对应攻击样本，请先导入 message_core.zip"}
         if len(self.manual_pending) + count > 10000 or self.manual_sent + count > 20000:
@@ -148,7 +161,13 @@ class GooseLab:
             self.manual_frames[number] = {"record": frame, "message": message}
             self.manual_pending.append((message["deliver_time_us"], number))
             self._dispatched_messages.append(message)
-        self._event(now, "manual_dispatch", f"交换机批量下发 {count} 帧洪泛流量" if flood else "交换机手动下发一帧攻击报文")
+        if suppression:
+            label = f"交换机下发 {count} 帧消息抑制报文（状态号投毒）"
+        elif flood:
+            label = f"交换机批量下发 {count} 帧洪泛流量"
+        else:
+            label = "交换机手动下发一帧攻击报文"
+        self._event(now, "manual_dispatch", label)
         return {"status": "accepted", "count": count, "batch_id": request_id}
 
     def drain_dispatch_messages(self):
@@ -212,7 +231,12 @@ class GooseLab:
             groups.setdefault(sample, []).append((number, arrival))
         events = []
         for sample, rows in groups.items():
-            capture = self.dos_capture if sample == "dos" else self.capture
+            if sample == "dos":
+                capture = self.dos_capture
+            elif sample == "suppression":
+                capture = self.suppression_capture
+            else:
+                capture = self.capture
             records = [self.frame_record(number) for number, _ in rows]
             points = [{"frame_no": record["frame_no"], "time_us": arrival, "length": record["frame_length"]}
                       for record, (_, arrival) in zip(records, rows)]
@@ -429,6 +453,7 @@ class GooseLab:
                 "manual_sent": self.manual_sent, "counts": dict(self.counts), "queue": len(self.queue),
                 "max_queue": self.max_queue, "max_delay_us": self.max_delay_us,
                 "subscription_expired": self.expired, "receiver_stNum": self.last_st,
+                "suppression_available": self.suppression_capture is not None,
                 "outcome": outcome, "severity": severity, "breaker_closed": closed,
                 "fault_active": bool(env.get("fault_active")), "fault_duration_us": elapsed if self.fault_started else 0,
                 "opened_us": self.opened_us, "first_trip_frame": self.first_trip_frame,

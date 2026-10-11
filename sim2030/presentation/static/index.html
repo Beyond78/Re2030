@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>国家重点研发计划2030 · 感控系统安全态势大屏</title>
-  <link rel="stylesheet" href="/style.css?v=20261011-layout2">
+  <link rel="stylesheet" href="/style.css?v=20261011-layout7">
 </head>
 <body>
   <!-- 顶部状态栏 -->
@@ -65,15 +65,6 @@
 
       <div class="section-title">仿真场景列表</div>
       <ul id="scenario-list" class="scenario-list"></ul>
-      <section id="goose-lab-options" class="goose-lab-options" aria-label="网络攻击实验设置" hidden>
-        <label for="goose-lab-sample">报文场景</label>
-        <select id="goose-lab-sample" class="form-select">
-          <option value="normal">正常对照 · 合法跳闸</option>
-          <option value="forgery" selected>报文伪造 · 误跳闸风险</option>
-          <option value="dos">DoS · 接收拥塞风险</option>
-        </select>
-        <p class="capture-muted">选择样本后加载；接收配置请点击智能终端。</p>
-      </section>
       <button id="create-run" class="btn btn-primary btn-block" disabled>加载并创建运行</button>
 
       <div class="run-meta-box">
@@ -99,11 +90,32 @@
       </div>
 
       <section id="cyber-demo-controls" class="cyber-demo-panel" aria-label="网络攻击演示" hidden></section>
-      <section id="goose-capture-summary" class="goose-capture-summary" aria-label="GOOSE 样本回放" hidden></section>
 
       <div class="section-title">设备控制面板</div>
       <div id="device-control-panel" class="device-control-panel">
-        <div class="device-control-empty">请在拓扑中点选设备</div>
+        <div id="device-control-body">
+          <div class="device-control-empty">请在拓扑中点选设备</div>
+        </div>
+        <!-- 断路器智能终端：点选设备后在此展开接收队列配置与处理记录 -->
+        <section id="goose-receiver-panel" class="goose-receiver-panel device-control-card" aria-label="断路器智能终端接收详情" hidden>
+          <div class="panel-header"><h2>断路器智能终端</h2></div>
+          <form id="receiver-settings" class="receiver-settings">
+            <label for="receiver-capacity">队列容量（帧）</label>
+            <input id="receiver-capacity" type="number" min="1" max="4096" step="1" required>
+            <label for="receiver-rate">处理速率（帧/秒）</label>
+            <input id="receiver-rate" type="number" min="10" max="50000" step="1" required>
+            <label class="receiver-check"><input id="receiver-filter" type="checkbox">启用入口过滤</label>
+            <button type="submit" id="receiver-apply" class="btn btn-primary">应用接收配置</button>
+            <p id="receiver-config-notice" class="capture-muted" role="status"></p>
+            <small>GOOSE 与遥控命令共用此队列。过滤作用于新到达的 GOOSE；已有队列按原计划处理。</small>
+          </form>
+          <div id="receiver-live"></div>
+          <h3 class="receiver-list-title">处理记录</h3>
+          <div id="receiver-history" class="receiver-frame-list"></div>
+          <div class="capture-pagination"><button type="button" id="receiver-older" class="btn btn-secondary">较早记录</button><button type="button" id="receiver-latest" class="btn btn-secondary">最新记录</button></div>
+        </section>
+        <!-- 交换机：点选交换机后在此展开端口清单与攻击报文下发 -->
+        <section id="switch-control-panel" class="switch-control-panel device-control-card" aria-label="交换机端口与控制" hidden></section>
       </div>
 
       <div class="section-title">时刻历史快照回放</div>
@@ -242,8 +254,6 @@
         </div>
       </div>
 
-      <section id="goose-lab-timeline" class="goose-lab-timeline" aria-label="报文到设备的事件时间线" hidden></section>
-
       <!-- 其它TAB视图的展示容器 -->
       <div id="sub-view-container" class="sub-view-container" style="display:none;">
         <div id="view-content" class="view-content"></div>
@@ -252,25 +262,7 @@
 
     <!-- 右侧：常态监控详情与动态事件 -->
     <aside class="panel side-panel right-panel">
-      <section id="goose-receiver-panel" class="goose-receiver-panel" aria-label="断路器智能终端接收详情" hidden>
-        <div class="panel-header"><h2>断路器智能终端</h2></div>
-        <form id="receiver-settings" class="receiver-settings">
-          <label for="receiver-capacity">队列容量（帧）</label>
-          <input id="receiver-capacity" type="number" min="1" max="4096" step="1" required>
-          <label for="receiver-rate">处理速率（帧/秒）</label>
-          <input id="receiver-rate" type="number" min="10" max="50000" step="1" required>
-          <label class="receiver-check"><input id="receiver-filter" type="checkbox">启用入口过滤</label>
-          <button type="submit" id="receiver-apply" class="btn btn-primary">应用接收配置</button>
-          <p id="receiver-config-notice" class="capture-muted" role="status"></p>
-          <small>GOOSE 与遥控命令共用此队列。过滤作用于新到达的 GOOSE；已有队列按原计划处理。</small>
-        </form>
-        <div id="receiver-live"></div>
-        <h3 class="receiver-list-title">处理记录</h3>
-        <div id="receiver-history" class="receiver-frame-list"></div>
-        <div class="capture-pagination"><button type="button" id="receiver-older" class="btn btn-secondary">较早记录</button><button type="button" id="receiver-latest" class="btn btn-secondary">最新记录</button></div>
-      </section>
       <section id="goose-lab-result" class="goose-lab-result" aria-label="GOOSE 实验结果" hidden></section>
-      <section id="goose-frame-panel" class="goose-frame-panel" aria-label="GOOSE 报文列表" hidden></section>
       <section id="cyber-demo-detail" class="cyber-demo-detail" aria-label="攻击情景说明" hidden></section>
       <section id="network-inspector" class="network-inspector" aria-label="网络安全监测">
         <div class="panel-header"><h2>网络安全监测</h2><span class="network-mode">旁路 IDS</span></div>
@@ -317,6 +309,6 @@
 
   <script src="/network-topology.js?v=20261011"></script>
   <script src="/simulation-player.js?v=20261011"></script>
-  <script src="/app.js?v=20261011-layout2"></script>
+  <script src="/app.js?v=20261011-layout7"></script>
 </body>
 </html>

@@ -219,12 +219,6 @@ async function loadScenarios() {
     li.addEventListener("click", () => {
       if (scenario.data_available === false) return;
       state.selectedScenario = scenario.scenario_id;
-      $("#goose-lab-options").hidden = !scenario.goose_lab;
-      if (scenario.goose_lab) {
-        const select = $("#goose-lab-sample");
-        [...select.options].forEach(option => { option.disabled = scenario.goose_samples?.[option.value] === false; });
-        if (select.selectedOptions[0]?.disabled) select.value = [...select.options].find(option => !option.disabled)?.value || "";
-      }
       list.querySelectorAll("li").forEach((node) => node.classList.remove("selected"));
       li.classList.add("selected");
       $("#create-run").disabled = state.loadingRun || simulationPlayer.busy;
@@ -290,10 +284,7 @@ async function createRun() {
       if (!await simulationPlayer.command("pause")) return;
     }
     setStatus("正在创建仿真运行...");
-    const gooseOptions = state.scenarios.find(item => item.scenario_id === scenarioId)?.goose_lab ? {
-      sample: $("#goose-lab-sample").value,
-    } : undefined;
-    const payload = await api("POST", "/api/runs", { scenario_id: scenarioId, goose_options: gooseOptions });
+    const payload = await api("POST", "/api/runs", { scenario_id: scenarioId });
     if (payload.error) { setStatus(payload.error, true); return; }
     state.runId = payload.run_id;
     simulationPlayer.bind(payload.run_id, payload);
@@ -441,41 +432,58 @@ function monitorRow(timeUs, badge, text) {
         </div>`;
 }
 
-/* 设备控制面板：能力描述由后端下发，前端只负责渲染 */
+/* 设备控制面板：能力描述由后端下发，前端只负责渲染。
+   面板内分三个互斥视图：普通设备控制项(#device-control-body)、
+   断路器智能终端接收详情(#goose-receiver-panel)、交换机详情(#switch-control-panel)。 */
+function syncDevicePanels(data) {
+  const receiver = data?.goose_lab?.receiver;
+  const showReceiver = state.selectedDeviceId === "ctl_brk" && !!receiver;
+  const selectedAsset = state.networkModel?.assets.find(a => a.id === state.selectedNetworkAsset) || null;
+  const showSwitch = !showReceiver && !state.selectedDeviceId && selectedAsset?.kind === "switch";
+  const receiverPanel = $("#goose-receiver-panel");
+  const switchPanel = $("#switch-control-panel");
+  const body = $("#device-control-body");
+  if (receiverPanel) receiverPanel.hidden = !showReceiver;
+  if (switchPanel) switchPanel.hidden = !showSwitch;
+  if (body) body.hidden = showReceiver || showSwitch;
+  return { showReceiver, showSwitch, selectedAsset };
+}
+
 async function loadDeviceControls(deviceId) {
-  const panel = $("#device-control-panel");
-  if (!panel) return;
+  const body = $("#device-control-body");
+  if (!body) return;
   if (!state.runId || !deviceId) {
-    panel.innerHTML = '<div class="device-control-empty">请在拓扑中点选设备</div>';
+    body.innerHTML = '<div class="device-control-empty">请在拓扑中点选设备</div>';
+    syncDevicePanels(state.systemData || {});
     return;
   }
   if (deviceId === 'ctl_brk' && state.systemData?.goose_lab?.receiver) {
-    panel.innerHTML = '<div class="device-control-empty">接收队列与参数已在右侧设备详情中打开</div>';
+    // 断路器智能终端：接收队列配置与处理记录直接在左侧设备面板展开
     renderGooseReceiver(state.systemData);
-    $("#goose-receiver-panel").scrollIntoView({block: 'nearest'});
+    $("#goose-receiver-panel")?.scrollIntoView({block: 'nearest'});
     return;
   }
-  renderGooseReceiver(state.systemData || {});
-  panel.innerHTML = '<div class="device-control-empty">正在读取设备控制项…</div>';
+  syncDevicePanels(state.systemData || {});
+  body.innerHTML = '<div class="device-control-empty">正在读取设备控制项…</div>';
   const payload = await api("GET", `/api/runs/${state.runId}/devices/${deviceId}/controls`);
   if (payload.error) {
-    panel.innerHTML = `<div class="device-control-empty">读取失败：${esc(payload.error)}</div>`;
+    body.innerHTML = `<div class="device-control-empty">读取失败：${esc(payload.error)}</div>`;
     return;
   }
   renderDeviceControlPanel(payload, deviceId);
 }
 
 function renderDeviceControlPanel(payload, deviceId) {
-  const panel = $("#device-control-panel");
-  if (!panel) return;
+  const body = $("#device-control-body");
+  if (!body) return;
   const controls = payload.controls || [];
 
   if (!controls.length) {
-    panel.innerHTML = '<div class="device-control-empty">该设备无可控项，仅支持观测</div>';
+    body.innerHTML = '<div class="device-control-empty">该设备无可控项，仅支持观测</div>';
     return;
   }
 
-  panel.innerHTML = controls.map((control) => {
+  body.innerHTML = controls.map((control) => {
     if (control.kind === "parameter") return renderParameterControl(control, deviceId);
     if (control.kind === "command") return renderCommandControl(control, deviceId);
     return "";
@@ -631,7 +639,6 @@ async function refreshViews() {
   }
   renderNetworkInspector(data);
   renderCyberDemo(data);
-  renderGooseCapture(data);
   renderGooseLab(data);
   renderGooseReceiver(data);
   return true;
@@ -664,8 +671,8 @@ function receiverRows(rows, emptyText) {
 
 function renderGooseReceiver(data) {
   const panel = $("#goose-receiver-panel"), receiver = data?.goose_lab?.receiver;
-  panel.hidden = state.selectedDeviceId !== 'ctl_brk' || !receiver;
-  if (!receiver) return;
+  const { showReceiver } = syncDevicePanels(data);
+  if (!receiver || !showReceiver) return;
   if (panel.dataset.runId !== data.run_id) {
     panel.dataset.runId = data.run_id;
     state.receiverPage = null;
@@ -675,7 +682,6 @@ function renderGooseReceiver(data) {
     $("#receiver-filter").checked = receiver.settings.policy === 'validated';
     $("#receiver-config-notice").textContent = '';
   }
-  if (panel.hidden) return;
   $("#receiver-apply").disabled = !!state.savingReceiver || simulationPlayer.terminal;
   const live = $("#receiver-live"), counts = receiver.counts;
   const queuedScroll = live.querySelector('.receiver-frame-list')?.scrollTop || 0;
@@ -734,9 +740,8 @@ async function loadReceiverHistory(before) {
 
 function renderGooseLab(data) {
   const lab = data.goose_lab;
-  const panel = $("#goose-lab-result"), timeline = $("#goose-lab-timeline");
+  const panel = $("#goose-lab-result");
   panel.hidden = !lab;
-  timeline.hidden = !lab || state.currentView !== "system";
   document.querySelectorAll(".goose-device-impact, .goose-device-fault").forEach(node => node.classList.remove("goose-device-impact", "goose-device-fault"));
   const pathLayer = $("#topo-goose-path");
   pathLayer.replaceChildren();
@@ -765,10 +770,6 @@ function renderGooseLab(data) {
         <p>正常样本帧按原时刻回放；攻击帧每次点击下发一帧。trip=false 不触发合闸。采集结束后可继续下发，订阅可能超时。</p>
         <p>IDS 参考提示来自报文检查，设备响应来自仿真，两者分别展示。</p>
       </details>`;
-    const events = [...lab.events].reverse();
-    timeline.innerHTML = `<div class="goose-timeline-heading"><b>报文 → 接收判定 → 跳闸 → 设备反馈</b><span>${faultText} · 点击帧号查看证据</span></div>
-      <div class="goose-events">${events.length ? events.map(event => `<div class="goose-event ${esc(event.kind)}"><time>${(event.time_us / 1000000).toFixed(3)} s</time><span>${esc(event.text)}</span>${event.frame_no ? `<button type="button" data-evidence-frame="${event.frame_no}">#${event.frame_no}</button>` : ''}</div>`).join('') : '<p class="capture-muted">开始推演后，在这里查看报文处理与设备动作。</p>'}</div>`;
-    timeline.querySelectorAll('[data-evidence-frame]').forEach(button => button.addEventListener('click', () => openGooseFrame(Number(button.dataset.evidenceFrame))));
   }
   if (!lab.breaker_closed) $("#topo-nodes [data-device-id='brk']")?.classList.add("goose-device-impact");
   if (lab.fault_active) {
@@ -777,77 +778,6 @@ function renderGooseLab(data) {
   }
   const terminal = $("#node-text-ctl_brk");
   if (terminal) terminal.textContent = lab.subscription_expired ? '[订阅超时]' : lab.trip_dispatched_us != null ? '[已下发跳闸]' : `[接收队列 ${lab.queue}]`;
-}
-
-function renderGooseCapture(data) {
-  const summary = $("#goose-capture-summary"), panel = $("#goose-frame-panel");
-  const capture = data.packet_capture;
-  summary.hidden = panel.hidden = !capture;
-  if (!capture) return;
-  if (state.gooseRunId !== data.run_id) {
-    state.gooseRunId = data.run_id;
-    state.goosePage = null;
-    state.gooseBefore = null;
-    state.gooseRequest++;
-    state.gooseDetailRequest++;
-  }
-  if (!capture.available) {
-    summary.innerHTML = `<div class="capture-notice">${esc(capture.reason || '样本不可用，请先导入数据')}</div>`;
-    panel.innerHTML = "";
-    delete panel.dataset.renderKey;
-    return;
-  }
-  summary.innerHTML = `<div class="capture-title">GOOSE 样本回放 <span>合成数据</span></div>
-    <p>${esc(capture.name)} · ${capture.visible_frames} / ${capture.total_frames} 帧</p>
-    <p class="capture-muted">预期发布/订阅：${esc(capture.goose_config.publisher)} → ${esc(capture.goose_config.subscriber)}</p>
-    <p class="capture-muted">过程网镜像口 · PCAP 与日志已核对</p>
-    <div class="capture-notice">${data.goose_lab ? "攻击帧需点击红色交换机手动下发；原样本列表保留作参考。" : "报文字段不驱动仿真设备。订阅端接收结果与断路器动作未知。"}</div>`;
-  const page = state.goosePage || capture;
-  const checks = Object.entries(capture.check_counts || {});
-  const rateWarning = capture.peak_frames_1s > capture.baseline.rate_threshold_1s;
-  const html = `<div class="capture-title">GOOSE 逐帧查看</div>
-    <div class="capture-brief">已回放 ${capture.visible_frames} 帧 · 采集时长 ${formatUs(capture.duration_us)}</div>
-    <div class="capture-checks"><b>参考检查提示</b>
-      ${checks.map(([name, count]) => `<p>${esc(name)}：${count} 帧</p>`).join("")}
-      <p class="${rateWarning ? 'capture-warning' : ''}">1 秒峰值 ${capture.peak_frames_1s} 帧 / 参考阈值 ${capture.baseline.rate_threshold_1s} 帧</p>
-      ${!capture.visible_frames ? '<p>等待推演推进后接收报文</p>' : !checks.length && !rateWarning ? '<p>当前未触发参考检查</p>' : ''}
-      <small>阈值取正常样本峰值的 5 倍；提示不等于攻击成功或设备动作。</small></div>
-    <div class="goose-frame-list"><table><thead><tr><th>帧 / 时刻</th><th>st / sq</th><th>trip</th><th>${data.goose_lab ? "接收结果" : "提示"}</th></tr></thead><tbody>
-      ${(page.frames || []).map(frame => `<tr class="${frame.checks.length ? 'has-check' : ''} ${frame.is_attack_frame ? 'goose-attack-row' : ''}">
-        <td><button type="button" data-goose-frame="${frame.frame_no}" aria-label="查看第 ${frame.frame_no} 帧">#${frame.frame_no}</button><small>${(frame.time_us / 1000000).toFixed(6)} s</small></td>
-        <td>${esc(frame.stNum)} / ${esc(frame.sqNum)}</td><td>${frame.trip === true ? 'true' : frame.trip === false ? 'false' : '—'}</td>
-        <td title="${esc(frame.receiver?.reason || frame.checks.join('；'))}">${frame.receiver ? esc(gooseDecisionLabel(frame.receiver.status)) : frame.checks.length ? `${frame.checks.length} 项` : '—'}</td></tr>`).join("")}
-    </tbody></table>${!page.frames?.length ? '<p class="capture-muted">尚无已到达的帧</p>' : ''}</div>
-    <div class="capture-pagination"><button type="button" id="goose-older" class="btn btn-secondary" ${!page.has_older ? 'disabled' : ''}>较早一页</button><button type="button" id="goose-latest" class="btn btn-secondary" ${state.gooseBefore === null ? 'disabled' : ''}>最新</button></div>
-    <div class="capture-jump"><input id="goose-frame-number" type="number" min="1" max="${capture.visible_frames}" placeholder="帧号" aria-label="GOOSE 帧号"><button type="button" id="goose-frame-open" class="btn btn-secondary" ${!capture.visible_frames ? 'disabled' : ''}>查看</button></div>`;
-  // 页面更新时保留正在输入的帧号和表格滚动位置。
-  if (panel.dataset.renderKey === html) return;
-  const input = $("#goose-frame-number");
-  const editing = input && document.activeElement === input;
-  if (editing) return;
-  const number = input?.value || "";
-  const scroll = panel.querySelector(".goose-frame-list")?.scrollTop || 0;
-  panel.dataset.renderKey = html;
-  panel.innerHTML = html;
-  $("#goose-frame-number").value = number;
-  panel.querySelector(".goose-frame-list").scrollTop = scroll;
-  panel.querySelectorAll("[data-goose-frame]").forEach(button => button.addEventListener("click", () => openGooseFrame(Number(button.dataset.gooseFrame))));
-  $("#goose-frame-open").addEventListener("click", () => openGooseFrame(Number($("#goose-frame-number").value)));
-  $("#goose-frame-number").addEventListener("keydown", event => {
-    if (event.key === "Enter") openGooseFrame(Number(event.target.value));
-  });
-  $("#goose-older").addEventListener("click", () => loadGoosePage(page.oldest_frame));
-  $("#goose-latest").addEventListener("click", () => {state.gooseBefore = null; state.goosePage = null; state.gooseRequest++; renderGooseCapture(state.systemData);});
-}
-
-async function loadGoosePage(before) {
-  const runId = state.runId, request = ++state.gooseRequest;
-  const response = await api("GET", `/api/runs/${runId}/views?view=goose&before_frame=${before}`);
-  if (runId !== state.runId || request !== state.gooseRequest) return;
-  if (response.error || response.data?.error) { setStatus(response.error || response.data.error, true); return; }
-  state.gooseBefore = before;
-  state.goosePage = response.data;
-  renderGooseCapture(state.systemData);
 }
 
 async function openGooseFrame(number) {
@@ -1561,10 +1491,10 @@ function getDeviceDynamicText(devId, mgmt, env) {
   return "";
 }
 
-async function sendAttackFrame(flood = false) {
+async function sendAttackFrame(flood = false, suppression = false) {
   if (state.sendingAttackFrame || state.loadingRun || simulationPlayer.busy || simulationPlayer.terminal) return;
   const count = flood ? Number($("#attack-batch-count")?.value || state.attackBatchCount || 1000) : 1;
-  if (!Number.isInteger(count) || count < 1 || count > 5000) { setStatus('每批数量须为 1–5000 的整数', true); return; }
+  if (flood && (!Number.isInteger(count) || count < 1 || count > 5000)) { setStatus('每批数量须为 1–5000 的整数', true); return; }
   state.attackBatchCount = count === 1 && !flood ? (state.attackBatchCount || 1000) : count;
   state.sendingAttackFrame = true;
   const runId = state.runId, wasRunning = simulationPlayer.running;
@@ -1572,8 +1502,10 @@ async function sendAttackFrame(flood = false) {
   renderNetworkInspector(state.systemData);
   try {
     if (wasRunning && !await simulationPlayer.command('pause')) return;
+    const actionType = suppression ? 'send_suppression_frame' : flood ? 'send_attack_burst' : 'send_attack_frame';
     const response = await api('POST', `/api/runs/${runId}/operations`, {
-      request_id: `attack-frame-${crypto.randomUUID()}`, target_asset_id: 'sw-process', action_type: flood ? 'send_attack_burst' : 'send_attack_frame', parameters: {count},
+      request_id: `attack-frame-${crypto.randomUUID()}`, target_asset_id: 'sw-process', action_type: actionType,
+      ...(flood ? { parameters: { count } } : {}),
     });
     if (response.status !== 'accepted') {
       setStatus(response.error || response.reason || '下发失败', true);
@@ -1582,7 +1514,8 @@ async function sendAttackFrame(flood = false) {
     }
     await simulationPlayer.command('start');
     await refreshViews();
-    setStatus(flood ? `已下发 ${count} 帧洪泛流量` : '攻击报文已从交换机发出');
+    setStatus(suppression ? `已下发 ${response.count ?? 2} 帧消息抑制报文（状态号投毒），可再手动下发跳闸帧观察其被拒绝`
+      : flood ? `已下发 ${count} 帧洪泛流量` : '攻击报文已从交换机发出');
   } finally {
     state.sendingAttackFrame = false;
     renderPlaybackControls();
@@ -1598,7 +1531,8 @@ function selectNetworkAsset(id) {
   renderGooseReceiver(state.systemData || {});
   renderNetworkAssets(state.systemData || {});
   renderNetworkInspector(state.systemData || {});
-  $("#send-attack-frame")?.scrollIntoView({block: "nearest"});
+  const asset = state.networkModel?.assets.find(a => a.id === id);
+  if (asset?.kind === "switch") $("#switch-control-panel")?.scrollIntoView({block: "nearest"});
 }
 
 function renderTopologyLinks() {
@@ -1679,6 +1613,47 @@ function renderNetworkAssets(data) {
   });
 }
 
+/* 交换机详情：点选交换机后在左侧设备控制面板展开（端口清单 + 攻击报文下发） */
+function renderSwitchControlPanel(data) {
+  const panel = $("#switch-control-panel");
+  if (!panel) return;
+  const { showSwitch, selectedAsset } = syncDevicePanels(data);
+  if (!showSwitch) {
+    if (panel.dataset.renderKey) { panel.replaceChildren(); delete panel.dataset.renderKey; }
+    return;
+  }
+  const model = state.networkModel;
+  const asset = selectedAsset;
+  if (!model || asset?.kind !== "switch") return;
+  const network = model.networks.find(n => n.id === asset.network_id);
+  const compromised = asset.id === data.topology?.layout?.goose_lab?.attack_origin?.asset_id && data.packet_capture?.sample !== 'normal';
+  const disabled = state.sendingAttackFrame || state.loadingRun || simulationPlayer.busy || simulationPlayer.terminal;
+  let html = `<div class="device-card-head"><h3>${esc(asset.name)}</h3><span>${network.connections.length} 个接入端口 · ${esc(network.mirror_port)}</span></div>`;
+  if (compromised) {
+    html += `<button type="button" id="send-attack-frame" class="btn btn-block send-attack-frame" ${disabled ? 'disabled' : ''}>${state.sendingAttackFrame ? '正在下发…' : '下发攻击报文（伪造跳闸帧）'}</button><p class="network-detail-hint">每次发送一帧跳闸报文 · 已下发 ${data.goose_lab?.manual_sent || 0} 帧</p>
+      <button type="button" id="send-suppression-frame" class="btn btn-block send-attack-frame send-suppression-frame" ${disabled || !data.goose_lab?.suppression_available ? 'disabled' : ''}>下发抑制帧（状态号投毒）</button>
+      <small>${data.goose_lab?.suppression_available ? '发送 2 帧高 stNum 的伪装心跳；之后再手动下发跳闸帧，会被终端判为“状态号回退”而拒绝（需基础检查策略）。' : '请先导入消息抑制报文样本。'}</small>
+      <div class="attack-batch-controls"><label for="attack-batch-count">批量数量（帧）</label><input id="attack-batch-count" type="number" min="1" max="5000" step="1" value="${esc(state.attackBatchCount || 1000)}">
+      <button type="button" id="send-attack-burst" class="btn btn-block send-attack-frame" ${disabled || !data.goose_lab?.flood_available ? 'disabled' : ''}>批量下发（DDoS 演示）</button>
+      <small>${data.goose_lab?.flood_available ? '同时下发整批洪泛帧；动画最多显示 24 帧，接收统计包含全部帧。' : '请先导入 DoS 报文样本。'}</small></div>`;
+  }
+  html += '<div class="network-detail-hint">端口接入清单</div><table class="network-ports"><tbody>';
+  html += network.connections.map(c => `<tr><td>${esc(c.switch_port)}</td><td>${esc(deviceName(c.device_id))}<small>${esc(c.interface_id)}</small></td></tr>`).join("");
+  html += `</tbody></table><p class="network-detail-hint">${esc(network.mirror_port)} 镜像全部已列接入端口的收发流量 → ${esc(network.probe.name)} / CAP0</p>`;
+  html += '<p class="network-detail-hint">镜像口流量与 IDS 观测事件见右侧「网络安全监测」。</p>';
+  const renderKey = [data.run_id || "", state.selectedNetworkAsset, data.goose_lab?.manual_sent || 0,
+    !!state.sendingAttackFrame, !!disabled, data.goose_lab?.flood_available, data.goose_lab?.suppression_available,
+    state.attackBatchCount || 1000, data.packet_capture?.sample].join("|");
+  if (panel.dataset.renderKey !== renderKey) {
+    panel.dataset.renderKey = renderKey;
+    panel.innerHTML = html;
+    panel.querySelector("#send-attack-frame")?.addEventListener("click", () => sendAttackFrame(false));
+    panel.querySelector("#send-suppression-frame")?.addEventListener("click", () => sendAttackFrame(false, true));
+    panel.querySelector("#send-attack-burst")?.addEventListener("click", () => sendAttackFrame(true));
+    panel.querySelector("#attack-batch-count")?.addEventListener("input", event => { state.attackBatchCount = event.target.value; });
+  }
+}
+
 function renderNetworkInspector(data) {
   const container = $("#network-inspector-body");
   const model = state.networkModel;
@@ -1687,7 +1662,14 @@ function renderNetworkInspector(data) {
     container.innerHTML = '<div class="monitor-empty">本场景未配置网络采集点</div>';
     return;
   }
-  const asset = model.assets.find(a => a.id === state.selectedNetworkAsset) || model.assets.find(a => a.kind === "probe");
+  renderSwitchControlPanel(data);
+  // 交换机的端口与控制已移至左侧设备控制面板，右侧监测面板聚焦 IDS/平台
+  let asset = model.assets.find(a => a.id === state.selectedNetworkAsset);
+  if (asset?.kind === "switch") {
+    asset = model.assets.find(a => a.kind === "probe" && a.network_id === asset.network_id)
+      || model.assets.find(a => a.kind === "probe");
+  }
+  asset = asset || model.assets.find(a => a.kind === "probe");
   const network = model.networks.find(n => n.id === asset.network_id);
   const events = data.observations?.ids_events || data.observations?.events || [];
   const idsEvents = events.filter(e => (e.source_type || e.raw?.source_type) === "ids");
@@ -1696,18 +1678,7 @@ function renderNetworkInspector(data) {
     `<button type="button" data-select-network="${esc(n.probe.id)}" class="${network?.id === n.id ? 'active' : ''}">${esc(n.name)}</button>`
   ).join("") + `<button type="button" data-select-network="security-manager" class="${asset.kind === 'manager' ? 'active' : ''}">汇总</button></div>`;
   html += `<h3 class="network-detail-title">${esc(asset.name)}</h3>`;
-  if (asset.kind === "switch") {
-    if (asset.id === data.topology?.layout?.goose_lab?.attack_origin?.asset_id && data.packet_capture?.sample !== 'normal') {
-      const disabled = state.sendingAttackFrame || state.loadingRun || simulationPlayer.busy || simulationPlayer.terminal;
-      html += `<button type="button" id="send-attack-frame" class="btn btn-block send-attack-frame" ${disabled ? 'disabled' : ''}>${state.sendingAttackFrame ? '正在下发…' : '下发攻击报文'}</button><p class="network-detail-hint">每次发送一帧 · 已下发 ${data.goose_lab?.manual_sent || 0} 帧</p>
-        <div class="attack-batch-controls"><label for="attack-batch-count">批量数量（帧）</label><input id="attack-batch-count" type="number" min="1" max="5000" step="1" value="${esc(state.attackBatchCount || 1000)}">
-        <button type="button" id="send-attack-burst" class="btn btn-block send-attack-frame" ${disabled || !data.goose_lab?.flood_available ? 'disabled' : ''}>批量下发（DDoS 演示）</button>
-        <small>${data.goose_lab?.flood_available ? '同时下发整批洪泛帧；动画最多显示 24 帧，接收统计包含全部帧。' : '请先导入 DoS 报文样本。'}</small></div>`;
-    }
-    html += '<div class="network-detail-hint">端口接入清单</div><table class="network-ports"><tbody>';
-    html += network.connections.map(c => `<tr><td>${esc(c.switch_port)}</td><td>${esc(deviceName(c.device_id))}<small>${esc(c.interface_id)}</small></td></tr>`).join("");
-    html += `</tbody></table><p class="network-detail-hint">${esc(network.mirror_port)} 镜像全部已列接入端口的收发流量 → ${esc(network.probe.name)} / CAP0</p>`;
-  } else if (asset.kind === "probe") {
+  if (asset.kind === "probe") {
     const summary = NetworkTopology.summarize(data, network.probe);
     html += `<div class="ids-status ${summary.status}">${esc(summary.label)}</div>
       <dl class="network-facts"><dt>采集来源</dt><dd>${esc(network.switch.name)} / ${esc(network.mirror_port)}</dd>
@@ -1730,14 +1701,11 @@ function renderNetworkInspector(data) {
     html += model.networks.map(n => `<div class="network-summary-row"><span>${esc(n.name)}</span><b>${esc(NetworkTopology.summarize(data, n.probe).label)}</b></div>`).join("");
   }
   if (unmapped.length) html += `<p class="network-detail-hint warning">${unmapped.length} 条 IDS 事件尚未匹配采集口，请核对 interface_id。</p>`;
-  html += '<p class="network-detail-hint network-scope">点击图中交换机查看接入端口；点击 IDS 查看观测事件。</p>';
+  html += '<p class="network-detail-hint network-scope">交换机端口接入与攻击下发已移至左侧「设备控制面板」；点击图中 IDS 查看观测事件。</p>';
   const renderKey = `${data.run_id || ""}:${html}`;
   if (container.dataset.renderKey !== renderKey) {
     container.dataset.renderKey = renderKey;
     container.innerHTML = html;
-    container.querySelector("#send-attack-frame")?.addEventListener("click", () => sendAttackFrame(false));
-    container.querySelector("#send-attack-burst")?.addEventListener("click", () => sendAttackFrame(true));
-    container.querySelector("#attack-batch-count")?.addEventListener("input", event => { state.attackBatchCount = event.target.value; });
     container.querySelectorAll("[data-select-network]").forEach(button => button.addEventListener("click", () => selectNetworkAsset(button.dataset.selectNetwork)));
     container.querySelectorAll("[data-ids-target]").forEach(button => button.addEventListener("click", () => {
       const id = button.dataset.idsTarget;

@@ -93,24 +93,14 @@
 .cyber-demo-mark.source text { fill: #fda4af; }
 .scenario-list li[aria-disabled="true"] { opacity: .55; cursor: default; }
 .scenario-unavailable { display: block; margin-top: 4px; color: #fbbf24; font-size: 10px; }
-.goose-capture-summary { border: 1px solid #24536b; background: #0e2431; border-radius: 7px; padding: 10px; margin: 12px 0; }
 .capture-title { color: #7dd3fc; font-size: 12px; font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
 .capture-title span { font-size: 10px; color: #fbbf24; font-weight: 400; }
-.goose-capture-summary p { margin: 8px 0; font-size: 11px; line-height: 1.6; }
 .capture-muted, .capture-brief { color: #92a8bf; font-size: 10px; line-height: 1.7; margin: 6px 0; }
 .capture-notice { color: #c5d5e6; font-size: 10px; line-height: 1.7; padding: 7px; background: rgba(38, 73, 93, .3); border-radius: 4px; }
-.goose-frame-panel { border-bottom: 1px solid #24536b; padding-bottom: 14px; margin-bottom: 16px; }
 .capture-checks { border-left: 2px solid #b38a46; padding: 6px 8px; margin: 9px 0; color: #b6c6d8; font-size: 10px; line-height: 1.7; background: #1a2333; }
 .capture-checks b { color: #fde68a; font-weight: 500; }
 .capture-checks small { color: #879db4; font-size: 10px; }
 .capture-warning { color: #fbbf24; }
-.goose-frame-list { max-height: 290px; overflow: auto; }
-.goose-frame-list table { width: 100%; border-collapse: collapse; font: 10px Consolas, 'Microsoft YaHei', sans-serif; }
-.goose-frame-list th { color: #8ba8c1; text-align: left; position: sticky; top: 0; background: #102036; }
-.goose-frame-list td, .goose-frame-list th { padding: 5px 3px; border-bottom: 1px solid #213247; }
-.goose-frame-list small { display: block; color: #8298b1; font-size: 9px; }
-.goose-frame-list button { border: 0; background: transparent; color: #7dd3fc; cursor: pointer; text-decoration: underline; font: inherit; padding: 2px 0; }
-.goose-frame-list .has-check { background: #30251d; color: #fcd68d; }
 .capture-pagination, .capture-jump { display: flex; gap: 6px; margin-top: 8px; }
 .capture-pagination .btn, .capture-jump .btn { flex: 1; font-size: 11px; padding: 6px; white-space: nowrap; }
 .capture-jump input { flex: 2; width: 0; min-width: 0; background: #132238; border: 1px solid #334b68; color: #dbeafe; border-radius: 4px; padding: 5px 7px; }
@@ -1809,11 +1799,8 @@ body.packet-inspector-open {
 }
 
  .goose-receive-path { fill: none; stroke-width: 2.5; stroke-dasharray: 7 5; opacity: .85; }
-/* GOOSE 接收实验：设备结果与逐帧证据相邻，时间线留在拓扑下方。 */
-.goose-lab-options { padding: 10px; border: 1px solid #33465d; border-radius: 6px; margin-bottom: 10px; }
-.goose-lab-options label { display: block; margin: 6px 0; font-size: 11px; color: #b7c9dc; }
-.goose-lab-options select { width: 100%; padding: 7px 4px; font-size: 11px; }
-.goose-lab-options[hidden], .goose-lab-result[hidden], .goose-lab-timeline[hidden] { display: none; }
+/* GOOSE 接收实验：设备结果与逐帧证据在侧栏展示。 */
+.goose-lab-result[hidden] { display: none; }
 .goose-lab-result { padding-bottom: 14px; margin-bottom: 12px; border-bottom: 1px solid #334155; }
 .goose-outcome { padding: 9px; margin-top: 9px; font-size: 13px; font-weight: 600; border-radius: 5px; border-left: 3px solid #34d399; background: #12382f; color: #a7f3d0; }
 .goose-outcome.warning { border-color: #fbbf24; background: #3b321e; color: #fde68a; }
@@ -1832,15 +1819,6 @@ body.packet-inspector-open {
 .goose-model-notes { font-size: 11px; color: #91a9c4; line-height: 1.6; }
 .goose-model-notes summary { cursor: pointer; color: #aac6e5; }
 .goose-model-notes p { margin: 6px 0; }
-.goose-lab-timeline { flex: 0 0 auto; border-top: 1px solid #334155; padding: 8px 12px; min-width: 0; }
-.goose-timeline-heading { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 11px; color: #c3d5e9; margin-bottom: 5px; }
-.goose-timeline-heading span { font-size: 10px; color: #91a9c4; }
-.goose-events { max-height: 110px; overflow-y: auto; }
-.goose-event { display: grid; grid-template-columns: 60px minmax(0,1fr) 42px; gap: 9px; padding: 5px 0; font-size: 11px; color: #b5c9df; border-bottom: 1px solid #223247; }
-.goose-event time { color: #7b96b5; font-family: Consolas, monospace; }
-.goose-event.breaker, .goose-event.fault, .goose-event.dropped { color: #fda4af; }
-.goose-event.command, .goose-event.accepted { color: #a7f3d0; }
-.goose-event button { color: #7dd3fc; border: 0; border-radius: 3px; background: #173550; cursor: pointer; }
 .topo-node.goose-device-impact rect { stroke: #fbbf24; stroke-width: 2; fill: #3b321e; }
 .topo-node.goose-device-fault rect { stroke: #fb7185; stroke-width: 2; fill: #3c2334; }
 @media (max-width: 1100px) { .goose-chart-pair { display: grid; grid-template-columns: 1fr; } }
@@ -1850,10 +1828,22 @@ body.packet-inspector-open {
 .network-asset.goose-compromised .network-name, .network-asset.goose-compromised .network-status { fill: #fda4af; }
 .send-attack-frame { background: #9f2946; border-color: #fb7185; color: #fff; margin: 8px 0; }
 .send-attack-frame:hover { background: #be3456; }
+.send-suppression-frame { background: #8a5a12; border-color: #fbbf24; }
+.send-suppression-frame:hover { background: #a06a16; }
 .goose-frame-list tr.goose-attack-row td, .goose-frame-list tr.goose-attack-row button { color: #fda4af; }
 
-.goose-receiver-panel { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #334155; }
+/* 设备控制面板内展开的设备详情卡片（断路器智能终端 / 交换机，自右侧移入） */
+.device-control-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; }
+.device-control-card[hidden] { display: none; }
+.device-control-card .panel-header { margin-bottom: 8px; padding-bottom: 6px; }
+.device-card-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border-color); }
+.device-card-head h3 { margin: 0; font-size: 13px; font-weight: 600; color: #f1f5f9; }
+.device-card-head span { font-size: 10px; color: var(--text-muted); }
+.switch-control-panel .network-ports td { padding: 5px 4px; }
+
+.goose-receiver-panel { padding-bottom: 4px; }
 .goose-receiver-panel[hidden] { display: none; }
+.device-control-card .receiver-settings { grid-template-columns: minmax(0, 1fr) 84px; }
 .receiver-settings { display: grid; grid-template-columns: 1fr 90px; gap: 8px; align-items: center; font-size: 11px; color: #b7c9dc; }
 .receiver-settings input[type=number], .attack-batch-controls input { background: #0c192a; border: 1px solid #415773; border-radius: 4px; padding: 7px; color: #e2e8f0; width: 100%; box-sizing: border-box; }
 .receiver-check, .receiver-settings button, .receiver-settings p, .receiver-settings small { grid-column: 1 / -1; }

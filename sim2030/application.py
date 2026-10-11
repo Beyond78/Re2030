@@ -218,14 +218,21 @@ class Application:
         if target_id == "run" or operation_type in ("start", "pause", "stop") or action_type in CONTROL_ACTIONS:
             return self._submit_control(request, request_id)
 
-        if target_id == "sw-process" and action_type in {"send_attack_frame", "send_attack_burst"}:
+        if target_id == "sw-process" and action_type in {"send_attack_frame", "send_attack_burst", "send_suppression_frame"}:
             if self.goose_lab is None or self.status not in {STATUS_READY, STATUS_PAUSED, STATUS_RUNNING}:
                 return {"request_id": request_id, "status": "rejected", "reason": "请先加载可运行的 GOOSE 场景"}
             parameters = request.get("parameters", {})
             if not isinstance(parameters, dict):
                 return {"request_id": request_id, "status": "rejected", "reason": "parameters 必须是对象"}
-            count = parameters.get("count", 1000) if action_type == "send_attack_burst" else 1
-            receipt = self.goose_lab.dispatch(request_id, self.current_time_us, self.dt_us, count, action_type == "send_attack_burst")
+            if action_type == "send_attack_burst":
+                count = parameters.get("count", 1000)
+            elif action_type == "send_suppression_frame":
+                count = 0  # 投毒帧数量由实验按 suppression 样本模板决定
+            else:
+                count = 1
+            receipt = self.goose_lab.dispatch(request_id, self.current_time_us, self.dt_us, count,
+                                              action_type == "send_attack_burst",
+                                              action_type == "send_suppression_frame")
             if self.recorder and receipt["status"] == "accepted":
                 self.recorder.append_many("business", [{**message, "time_us": self.current_time_us} for message in self.goose_lab.drain_dispatch_messages()])
                 self.recorder.append_many("goose", self.goose_lab.drain_records())
