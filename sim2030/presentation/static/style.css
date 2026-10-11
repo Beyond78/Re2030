@@ -5,6 +5,61 @@
   padding: 0;
 }
 
+/* 站控网、过程网与旁路 IDS；不同端口的线交叉时不表示连接。 */
+.topo-link.station { stroke: #38bdf8; stroke-width: 1.8; }
+.topo-link.process { stroke: #2dd4bf; stroke-width: 1.8; }
+.topo-link.mirror { stroke: #a78bfa; stroke-width: 2; stroke-dasharray: 6 4; }
+.topo-link.management { stroke: #a78bfa; stroke-width: 1.5; stroke-dasharray: 2 5; opacity: .65; }
+.topo-link.measurement { stroke: #94a3b8; stroke-width: 1.6; }
+.topo-link.timing { stroke: #fbbf24; stroke-width: 1.5; stroke-dasharray: 9 4 2 4; }
+.legend-line.line-station { border-top: 2px solid #38bdf8; }
+.legend-line.line-process { border-top: 2px solid #2dd4bf; }
+.legend-line.line-mirror { border-top: 2px dashed #a78bfa; }
+.legend-line.line-management { border-top: 2px dotted #a78bfa; }
+.legend-line.line-measurement { border-top: 2px solid #94a3b8; }
+.legend-line.line-timing { border-top: 2px dashed #fbbf24; }
+.network-asset { cursor: pointer; outline: none; }
+.network-asset rect { fill: #112438; stroke: #49718b; stroke-width: 1.5; }
+.network-asset.probe rect, .network-asset.manager rect { fill: #1b1c34; stroke: #8374b7; }
+.network-asset.selected rect, .network-asset:focus-visible rect { stroke: #e2e8f0; stroke-width: 2.5; }
+.network-asset:hover rect { fill: #24374b; }
+.network-asset.has-alert rect { stroke: #f59e0b; fill: #322414; }
+.network-name { fill: #f1f5f9; font: 600 13px 'Microsoft YaHei', sans-serif; }
+.network-subtitle { fill: #9eafc4; font-size: 10px; }
+.network-status { fill: #b8ace3; font-size: 10px; }
+.has-alert .network-status { fill: #fbbf24; }
+.network-interface { pointer-events: none; }
+.network-interface.station { fill: #38bdf8; }
+.network-interface.process { fill: #2dd4bf; }
+.network-interface text { font: 9px Consolas, monospace; }
+.monitoring-zone-title { fill: #b9addf; font-size: 14px; font-weight: 600; }
+.network-inspector { margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color); }
+.network-mode { margin-left: auto; color: #b9addf; font: 10px Consolas, monospace; }
+.network-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.network-tabs button, .ids-targets button { border: 1px solid #334155; border-radius: 4px; padding: 5px 9px; background: #132238; color: #b5c4d8; cursor: pointer; font: inherit; font-size: 11px; }
+.network-tabs button.active { border-color: #a78bfa; color: #e4dcff; background: #282044; }
+.network-tabs button:focus-visible, .ids-targets button:focus-visible { outline: 2px solid #e4dcff; }
+.network-detail-title { font-size: 13px; margin-bottom: 9px; color: #e2e8f0; }
+.network-detail-hint { font-size: 11px; line-height: 1.8; color: #8fa3bb; margin: 8px 0; }
+.network-detail-hint.warning { color: #fbbf24; }
+.network-scope { margin-bottom: 0; }
+.ids-status { padding: 7px 10px; border: 1px solid #3b4359; border-radius: 5px; color: #a5b4c9; font-size: 12px; }
+.ids-status.alert { color: #fbbf24; border-color: #a16207; background: #30220d; }
+.ids-status.receiving { color: #67e8f9; border-color: #155e75; }
+.network-facts { display: grid; grid-template-columns: 75px 1fr; gap: 6px 8px; font-size: 11px; line-height: 1.6; margin-top: 10px; }
+.network-facts dt { color: #72869f; }
+.network-facts dd { color: #c6d2e2; overflow-wrap: anywhere; }
+.network-ports { width: 100%; border-collapse: collapse; font-size: 11px; }
+.network-ports td { padding: 6px; border-bottom: 1px solid #243145; }
+.network-ports small { display: block; color: #7f9ab6; }
+.ids-event { border-left: 2px solid #8374b7; padding: 7px 9px; margin-top: 10px; font-size: 11px; line-height: 1.8; background: #131e31; overflow-wrap: anywhere; }
+.ids-event small { display: block; color: #8395af; font-size: 10px; }
+.ids-targets { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+.network-summary-row { display: flex; justify-content: space-between; gap: 8px; padding: 8px 0; font-size: 11px; border-bottom: 1px solid #243145; }
+.network-summary-row b { font-weight: 400; color: #b8ace3; }
+.topo-zoom-controls { position: absolute; left: 10px; top: 8px; display: flex; gap: 4px; z-index: 5; }
+.topo-zoom-controls button { font-size: 15px; padding: 3px 9px; }
+
 :root {
   --bg-main: #070d19;
   --bg-panel: #0d1829;
@@ -1598,4 +1653,30 @@ body.packet-inspector-open {
     width: calc(100vw - 20px);
     max-height: calc(100vh - 24px);
   }
+}
+
+/* 在 Codex 预览窗和窄窗口中完整展示拓扑，控制和监测面板排在下方。 */
+@media (max-width: 1450px) {
+  .topbar { flex-wrap: wrap; gap: 8px; }
+  .brand { width: auto; min-width: 0; max-width: none; flex: 1; }
+  .metric-ribbon { order: 3; width: 100%; flex-basis: 100%; gap: 6px; }
+  .metric-card { width: auto; min-width: 0; max-width: none; flex: 1; }
+  .layout { grid-template-columns: 230px minmax(0, 1fr) 280px; height: calc(100vh - 122px); }
+  .tabs { flex-wrap: wrap; }
+}
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); height: auto; align-items: start; }
+  .center-panel { grid-column: 1 / -1; grid-row: 1; height: max(620px, 80vh); }
+  .left-panel { grid-column: 1; }
+  .right-panel { grid-column: 2; }
+  .topbar { position: relative; }
+  .top-status-indicator { width: auto; min-width: 0; max-width: 260px; }
+  .metric-ribbon { flex-wrap: wrap; }
+  .metric-card { flex: 1 1 28%; }
+  .legend-row { flex-wrap: wrap; }
+}
+@media (max-width: 560px) {
+  .layout { grid-template-columns: minmax(0, 1fr); padding: 6px; }
+  .left-panel, .right-panel { grid-column: 1; }
+  .brand-text h1 { font-size: 13px; }
 }

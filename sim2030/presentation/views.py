@@ -10,6 +10,7 @@ from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
 from sim2030.records import RunReader
+from sim2030.contracts import event_key
 
 
 def _reader(records) -> RunReader:
@@ -108,6 +109,10 @@ def build_system_view(records) -> Dict[str, Any]:
         "observations": {
             "event_count": len(events),
             "by_source": by_source,
+            "ids_events": [event for event in events
+                           if event.get("source_type") == "ids"
+                           and event_key(event.get("provider_id", ""), event.get("event_id", ""))
+                           in latest_batch.get("event_keys", [])],
             "missing": latest_batch.get("missing", []),
             "late": latest_batch.get("late", []),
         },

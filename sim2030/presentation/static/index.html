@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>国家重点研发计划2030 · 感控系统安全态势大屏</title>
-  <link rel="stylesheet" href="/style.css?v=20260928_v3">
+  <link rel="stylesheet" href="/style.css?v=20261011">
 </head>
 <body>
   <!-- 顶部状态栏 -->
@@ -173,9 +173,16 @@
       </div>
         <!-- SVG 拓扑画布：可拖动平移，Ctrl+滚轮缩放 -->
         <div id="topo-viewport" class="topo-viewport">
+        <div class="topo-zoom-controls">
+          <button type="button" id="zoom-in" class="legend-btn" aria-label="放大拓扑">＋</button>
+          <button type="button" id="zoom-out" class="legend-btn" aria-label="缩小拓扑">−</button>
+        </div>
         <button type="button" id="zoom-reset" class="legend-btn topo-reset-btn" title="恢复到自动铺满并居中">重置视图</button>
         <svg id="topo-svg" class="topo-svg" viewBox="0 0 920 780" preserveAspectRatio="xMidYMid meet">
           <defs>
+            <marker id="monitor-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a78bfa" />
+            </marker>
             <linearGradient id="grad-station" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="#1e293b" />
               <stop offset="100%" stop-color="#0f172a" />
@@ -198,11 +205,14 @@
           <!-- 拓扑连接线图层 -->
           <g id="topo-links" class="topo-links-layer"></g>
 
+
           <!-- 报文流粒子动画图层 -->
           <g id="topo-packets" class="topo-packets-layer"></g>
 
           <!-- 拓扑设备节点图层 -->
           <g id="topo-nodes" class="topo-nodes-layer"></g>
+          <!-- 交换机、镜像口与安全监测设备 -->
+          <g id="topo-network-assets"></g>
         </svg>
         </div>
       </div>
@@ -215,6 +225,10 @@
 
     <!-- 右侧：常态监控详情与动态事件 -->
     <aside class="panel side-panel right-panel">
+      <section id="network-inspector" class="network-inspector" aria-label="网络安全监测">
+        <div class="panel-header"><h2>网络安全监测</h2><span class="network-mode">旁路 IDS</span></div>
+        <div id="network-inspector-body"><div class="monitor-empty">加载场景后查看采集点与接口</div></div>
+      </section>
       <div class="panel-header">
         <span class="icon">🖥</span>
         <h2>监控交互流（实时）</h2>
@@ -254,6 +268,7 @@
   </div>
   <div id="packet-inspector-toast" class="packet-inspector-toast" role="status" aria-live="polite"></div>
 
-  <script src="/app.js?v=20260928_v3"></script>
+  <script src="/network-topology.js?v=20261011"></script>
+  <script src="/app.js?v=20261011"></script>
 </body>
 </html>

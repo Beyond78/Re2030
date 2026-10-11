@@ -20,6 +20,8 @@ const state = {
   pan: { x: 0, y: 0 },
   viewTouched: false,
   dragMoved: false,
+  selectedNetworkAsset: "ids-station",
+  networkModel: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -29,7 +31,9 @@ function esc(value) {
   return String(value)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 async function api(method, path, body) {
@@ -186,6 +190,14 @@ async function loadScenarios() {
     const li = document.createElement("li");
     li.innerHTML = `<strong>${esc(scenario.name || scenario.scenario_id)}</strong>`;
     li.dataset.scenarioId = scenario.scenario_id;
+    li.setAttribute("role", "button");
+    li.setAttribute("tabindex", "0");
+    li.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        li.click();
+      }
+    });
     li.addEventListener("click", () => {
       state.selectedScenario = scenario.scenario_id;
       list.querySelectorAll("li").forEach((node) => node.classList.remove("selected"));
@@ -544,6 +556,7 @@ async function refreshViews() {
     updateInterferenceFlow(data);
     updateAlertFeed(data);
     updateMonitorPanel(data);
+    renderNetworkInspector(data);
   } else {
     showSubView();
     renderOtherView(state.currentView, data);
@@ -554,6 +567,7 @@ async function refreshViews() {
         updateMetricsRibbon(res.data);
         updateActualConditions(res.data);
         updateMonitorPanel(res.data);
+        renderNetworkInspector(res.data);
       }
     });
   }
@@ -721,7 +735,13 @@ const LAYER_TITLES = {
   process: "过程层 (PROCESS LAYER - 感知 / 采集 / 执行 / 一次)",
 };
 const LINK_TYPE_META = {
-  wired: { label: "站内网络总线", cls: "line-wired", title: "站内以太网数字通信总线 (MMS/GOOSE/SV)" },
+  wired: { label: "有线通信", cls: "line-wired", title: "场景声明的有线通信关系" },
+  station: { label: "站控网", cls: "line-station", title: "站控侧以太网端口，经站控网交换机连接" },
+  process: { label: "过程网", cls: "line-process", title: "过程侧以太网端口，经过程网交换机连接" },
+  mirror: { label: "流量镜像 → IDS", cls: "line-mirror", title: "交换机 SPAN 口向 IDS 采集口复制双向流量" },
+  management: { label: "监测上报", cls: "line-management", title: "IDS 独立管理口向安全监测平台上报" },
+  measurement: { label: "采集接线", cls: "line-measurement", title: "传感器与采集单元之间的本地采集连接" },
+  timing: { label: "专用对时", cls: "line-timing", title: "授时系统到采集单元的专用对时连接" },
   wireless: { label: "无线链路", cls: "line-wireless", title: "跨站与星地无线链路（授时卫星↔授时系统、其他电站↔站端监控）" },
   interference: { label: "电磁干扰", cls: "line-interference", title: "电磁攻击节点对电流互感器的干扰耦合（红色虚线，手动触发）" },
   hardwire: { label: "控制硬接线", cls: "line-hardwire", title: "控制接口至一次设备电磁线圈的硬接线控制回路" },
@@ -840,6 +860,10 @@ function applyCanvasSize(layout, bands) {
     width = width || maxX + 10;
     height = height || maxY + 20;
   }
+  if (state.networkModel) {
+    width = Math.max(width, state.networkModel.width);
+    height = Math.max(height, state.networkModel.height);
+  }
   state.canvasSize = { width: Math.round(width), height: Math.round(height) };
   svg.setAttribute("viewBox", `0 0 ${state.canvasSize.width} ${state.canvasSize.height}`);
   if (state.viewTouched) applyTopoTransform();
@@ -889,7 +913,7 @@ function setupTopoInteraction() {
   let drag = null;
   viewport.addEventListener("mousedown", (event) => {
     if (event.button !== 0) return;
-    if (event.target.closest("#zoom-reset")) return; // 点在重置按钮上不触发拖动
+    if (event.target.closest("#zoom-reset, .topo-zoom-controls")) return;
     drag = { x: event.clientX, y: event.clientY, panX: state.pan.x, panY: state.pan.y, moved: false };
     viewport.classList.add("dragging");
     event.preventDefault();
@@ -942,6 +966,14 @@ function setupTopoInteraction() {
   window.addEventListener("resize", () => {
     if (!state.viewTouched) fitTopoToViewport();
   });
+  [["#zoom-in", 1.25], ["#zoom-out", 0.8]].forEach(([selector, factor]) => {
+    $(selector).addEventListener("click", () => {
+      if (!state.canvasSize) return;
+      state.zoom = Math.min(3, Math.max(0.2, state.zoom * factor));
+      state.viewTouched = true;
+      applyTopoTransform();
+    });
+  });
 }
 
 /* 恢复默认视图：自动铺满并居中 */
@@ -955,8 +987,9 @@ function renderLinkLegend(links) {
   const box = $("#legend-links");
   if (!box) return;
   const present = [];
-  links.forEach((link) => {
-    const type = link.link_type || "wired";
+  const displayed = state.networkModel?.cables || links.map(link => ({ kind: link.link_type || "wired" }));
+  displayed.forEach((link) => {
+    const type = link.kind;
     if (!present.includes(type)) present.push(type);
   });
   const ordered = Object.keys(LINK_TYPE_META)
@@ -981,6 +1014,7 @@ function applyScenarioLayout(topo) {
   Object.assign(NODE_COORDINATES, resolveNodeCoordinates(devices, layout));
 
   const bands = resolveLayerBands(layout, devices);
+  state.networkModel = NetworkTopology.build(topo, NODE_COORDINATES);
   renderLayerBands(bands);
   applyCanvasSize(layout, bands);
   renderLinkLegend(topo.links || []);
@@ -1081,6 +1115,155 @@ function getDeviceDynamicText(devId, mgmt, env) {
   return "";
 }
 
+function selectNetworkAsset(id) {
+  if (state.dragMoved) return;
+  state.selectedNetworkAsset = id;
+  renderNetworkAssets(state.systemData || {});
+  renderNetworkInspector(state.systemData || {});
+}
+
+function renderTopologyLinks() {
+  const group = $("#topo-links");
+  const model = state.networkModel;
+  if (!group || !model) return;
+  const key = JSON.stringify(model.cables);
+  if (group.dataset.renderKey === key) return;
+  group.dataset.renderKey = key;
+  group.replaceChildren();
+  for (const cable of model.cables) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", NetworkTopology.pathData(cable.points));
+    path.setAttribute("class", `topo-link ${cable.kind}`);
+    path.setAttribute("fill", "none");
+    path.dataset.linkId = cable.id;
+    if (cable.kind === "mirror" || cable.kind === "management") path.setAttribute("marker-end", "url(#monitor-arrow)");
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent = cable.title;
+    path.appendChild(title);
+    group.appendChild(path);
+  }
+}
+
+function renderNetworkAssets(data) {
+  const group = $("#topo-network-assets");
+  const model = state.networkModel;
+  if (!group || !model) return;
+  const key = JSON.stringify([model.assets, model.interfaces]);
+  if (group.dataset.renderKey !== key) {
+    group.dataset.renderKey = key;
+    group.replaceChildren();
+    for (const asset of model.assets) {
+      const node = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      node.setAttribute("transform", `translate(${asset.x},${asset.y})`);
+      node.setAttribute("class", `network-asset ${asset.kind}`);
+      node.setAttribute("role", "button");
+      node.setAttribute("tabindex", "0");
+      node.setAttribute("aria-label", `查看${asset.name}`);
+      node.dataset.networkAsset = asset.id;
+      const network = model.networks.find(n => n.id === asset.network_id);
+      const subtitle = asset.kind === "switch" ? `${network.connections.length} 个接入端口 · ${network.mirror_port}` :
+        asset.kind === "probe" ? "CAP0 采集 / MGMT 上报" : "集中查看监测结果";
+      node.innerHTML = `<rect width="${asset.width}" height="${asset.height}" rx="7" />
+        <text x="12" y="23" class="network-name">${esc(asset.name)}</text>
+        <text x="12" y="42" class="network-subtitle">${esc(subtitle)}</text>
+        ${asset.kind !== "switch" ? '<text x="12" y="57" class="network-status"></text>' : ''}`;
+      node.addEventListener("click", () => selectNetworkAsset(asset.id));
+      node.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          selectNetworkAsset(asset.id);
+        }
+      });
+      group.appendChild(node);
+    }
+    for (const port of model.interfaces) {
+      const node = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      node.setAttribute("class", `network-interface ${port.network_id}`);
+      node.innerHTML = `<circle cx="${port.anchor.x}" cy="${port.anchor.y}" r="3" />
+        <text x="${port.anchor.x + 6}" y="${port.anchor.y + (port.anchor_y ? 12 : -7)}">${esc(port.interface_id)}</text>
+        <circle cx="${port.port.x}" cy="${port.port.y}" r="2.5" />`;
+      group.appendChild(node);
+    }
+    if (model.assets.length) {
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", "1040"); label.setAttribute("y", "150");
+      label.setAttribute("class", "monitoring-zone-title");
+      label.textContent = "网络安全监测";
+      group.appendChild(label);
+    }
+  }
+  group.querySelectorAll("[data-network-asset]").forEach(node => {
+    const id = node.dataset.networkAsset;
+    const asset = model.assets.find(a => a.id === id);
+    const network = model.networks.find(n => n.id === asset.network_id);
+    node.classList.toggle("selected", id === state.selectedNetworkAsset);
+    node.setAttribute("aria-pressed", String(id === state.selectedNetworkAsset));
+    const summary = asset.kind === "probe" ? NetworkTopology.summarize(data, network.probe) : null;
+    node.classList.toggle("has-alert", summary?.status === "alert");
+    const label = node.querySelector(".network-status");
+    if (label) label.textContent = summary?.label || "监测结果汇总";
+  });
+}
+
+function renderNetworkInspector(data) {
+  const container = $("#network-inspector-body");
+  const model = state.networkModel;
+  if (!container || !model) return;
+  if (!model.networks.length) {
+    container.innerHTML = '<div class="monitor-empty">本场景未配置网络采集点</div>';
+    return;
+  }
+  const asset = model.assets.find(a => a.id === state.selectedNetworkAsset) || model.assets.find(a => a.kind === "probe");
+  const network = model.networks.find(n => n.id === asset.network_id);
+  const events = data.observations?.ids_events || data.observations?.events || [];
+  const idsEvents = events.filter(e => (e.source_type || e.raw?.source_type) === "ids");
+  const unmapped = idsEvents.filter(e => !model.networks.some(n => NetworkTopology.eventMatches(e, n.probe)));
+  let html = '<div class="network-tabs">' + model.networks.map(n =>
+    `<button type="button" data-select-network="${esc(n.probe.id)}" class="${network?.id === n.id ? 'active' : ''}">${esc(n.name)}</button>`
+  ).join("") + `<button type="button" data-select-network="security-manager" class="${asset.kind === 'manager' ? 'active' : ''}">汇总</button></div>`;
+  html += `<h3 class="network-detail-title">${esc(asset.name)}</h3>`;
+  if (asset.kind === "switch") {
+    html += '<div class="network-detail-hint">端口接入清单</div><table class="network-ports"><tbody>';
+    html += network.connections.map(c => `<tr><td>${esc(c.switch_port)}</td><td>${esc(deviceName(c.device_id))}<small>${esc(c.interface_id)}</small></td></tr>`).join("");
+    html += `</tbody></table><p class="network-detail-hint">${esc(network.mirror_port)} 镜像全部已列接入端口的收发流量 → ${esc(network.probe.name)} / CAP0</p>`;
+  } else if (asset.kind === "probe") {
+    const summary = NetworkTopology.summarize(data, network.probe);
+    html += `<div class="ids-status ${summary.status}">${esc(summary.label)}</div>
+      <dl class="network-facts"><dt>采集来源</dt><dd>${esc(network.switch.name)} / ${esc(network.mirror_port)}</dd>
+      <dt>采集口标识</dt><dd>${esc(network.probe.interface_id)}</dd>
+      <dt>部署方式</dt><dd>旁路接收 · 独立管理口上报</dd>
+      <dt>当前窗口</dt><dd>${summary.events.length} 条事件 / ${summary.alerts.length} 条告警</dd></dl>`;
+    if (!summary.events.length) html += '<p class="network-detail-hint">当前窗口没有该采集口的 IDS 事件，检测状态未知。</p>';
+    html += summary.events.slice(-4).reverse().map(event => {
+      const raw = event.raw || event, record = raw.data || {};
+      const targets = [...new Set([record.src_asset_id, record.dst_asset_id, ...(raw.related_asset_ids || [])].filter(Boolean))];
+      const origin = raw.data_origin === "synthetic" ? "合成数据" : raw.data_origin || "来源未标明";
+      return `<div class="ids-event"><strong>${esc(record.alert_type || record.event_type || 'IDS 事件')}</strong>
+        <small>${esc(raw.observed_at || raw.timestamp || formatUs(event.received_time_us))} · ${esc(origin)}</small>
+        <div>${esc(record.protocol || '协议未提供')}${record.severity !== undefined ? ` · 原始等级 ${esc(record.severity)}` : ''}</div>
+        <div class="ids-targets">${targets.map(id => `<button type="button" data-ids-target="${esc(id)}">${esc(deviceName(id))}</button>`).join("")}</div>
+        <small>事件 ${esc(event.event_id || raw.event_id)}</small></div>`;
+    }).join("");
+  } else {
+    html += '<p class="network-detail-hint">各探针通过独立管理口上报，采集口不承担两张业务网之间的转发。</p>';
+    html += model.networks.map(n => `<div class="network-summary-row"><span>${esc(n.name)}</span><b>${esc(NetworkTopology.summarize(data, n.probe).label)}</b></div>`).join("");
+  }
+  if (unmapped.length) html += `<p class="network-detail-hint warning">${unmapped.length} 条 IDS 事件尚未匹配采集口，请核对 interface_id。</p>`;
+  html += '<p class="network-detail-hint network-scope">点击图中交换机查看接入端口；点击 IDS 查看观测事件。</p>';
+  const renderKey = `${data.run_id || ""}:${html}`;
+  if (container.dataset.renderKey !== renderKey) {
+    container.dataset.renderKey = renderKey;
+    container.innerHTML = html;
+    container.querySelectorAll("[data-select-network]").forEach(button => button.addEventListener("click", () => selectNetworkAsset(button.dataset.selectNetwork)));
+    container.querySelectorAll("[data-ids-target]").forEach(button => button.addEventListener("click", () => {
+      const id = button.dataset.idsTarget;
+      if (!(data.topology?.devices || []).some(d => d.device_id === id)) return;
+      inspectDevice(id, true);
+      renderTopology(data);
+    }));
+  }
+}
+
 /* 渲染/增量更新态势拓扑图 (SVG) */
 function renderTopology(data) {
   const topo = data.topology || {};
@@ -1097,6 +1280,13 @@ function renderTopology(data) {
     state.selectedDeviceId = null;
     state.viewTouched = false; // 切换场景时重新自动铺满并居中
     state.pan = { x: 0, y: 0 };
+    state.selectedNetworkAsset = "ids-station";
+    $("#topo-network-assets").removeAttribute("data-render-key");
+    particleMap.clear();
+    packetMessageMap.clear();
+    interferenceParticles.clear();
+    clearParticleNodes();
+    closePacketInspector();
   }
   // 版式（节点坐标、分区带、画布、图例）全部来自当前场景数据
   applyScenarioLayout(topo);
@@ -1117,38 +1307,10 @@ function renderTopology(data) {
 
   const linksGroup = $("#topo-links");
   const nodesGroup = $("#topo-nodes");
+  renderNetworkAssets(data);
 
-  // 渲染/同步连线
-  if (!state.renderedTopologyOnce || linksGroup.children.length === 0) {
-    linksGroup.innerHTML = "";
-    links.forEach((link) => {
-      const srcId = Array.isArray(link.endpoint_a) ? link.endpoint_a[0] : link.endpoint_a;
-      const dstId = Array.isArray(link.endpoint_b) ? link.endpoint_b[0] : link.endpoint_b;
-
-      const srcCoord = NODE_COORDINATES[srcId];
-      const dstCoord = NODE_COORDINATES[dstId];
-      if (!srcCoord || !dstCoord) return;
-
-      const x1 = srcCoord.x + 45;
-      const y1 = srcCoord.y + 24;
-      const x2 = dstCoord.x + 45;
-      const y2 = dstCoord.y + 24;
-
-      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      line.setAttribute("x1", x1);
-      line.setAttribute("y1", y1);
-      line.setAttribute("x2", x2);
-      line.setAttribute("y2", y2);
-      line.setAttribute("class", `topo-link ${link.link_type || "wired"}`);
-      line.setAttribute("data-link-id", link.link_id || "");
-
-      const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-      title.textContent = `${srcId} ↔ ${dstId} (${link.link_type || "wired"})`;
-      line.appendChild(title);
-
-      linksGroup.appendChild(line);
-    });
-  }
+  // 网络接入线按交换机端口绘制，业务关系仅用于报文路径。
+  renderTopologyLinks();
 
   // 渲染/同步节点位置与动态状态
   if (!state.renderedTopologyOnce || nodesGroup.children.length === 0) {
@@ -1247,6 +1409,14 @@ function ensureParticleNode(packetLayer, key, category, radius) {
     node = document.createElementNS("http://www.w3.org/2000/svg", "g");
     node.setAttribute("class", "msg-particle-group");
     node.setAttribute("role", "button");
+    node.setAttribute("tabindex", "0");
+    node.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const message = packetMessageMap.get(node.getAttribute("data-message-id"));
+      if (!message) return;
+      event.preventDefault();
+      openPacketInspector(message);
+    });
 
     const hit = document.createElementNS("http://www.w3.org/2000/svg", "circle");
     hit.setAttribute("class", "msg-particle-hit");
@@ -1321,9 +1491,9 @@ function animateParticles(now) {
         }
       }
 
-      // 计算平滑贝塞尔或线性插值坐标
-      const curX = p.x1 + (p.x2 - p.x1) * progress;
-      const curY = p.y1 + (p.y2 - p.y1) * progress;
+      const position = NetworkTopology.pointAt(p.points, progress);
+      const curX = position.x;
+      const curY = position.y;
 
       // 尾迹与淡入淡出透明度
       let opacity = 1.0;
@@ -1416,10 +1586,13 @@ function updatePacketFlow(data) {
     const src = NODE_COORDINATES[msg.sender_id];
     const dst = NODE_COORDINATES[msg.receiver_id];
     if (!src || !dst) return;
+    const points = NetworkTopology.messageRoute(state.networkModel, msg);
+    if (!points) return;
 
     particleMap.set(id, {
       id: id,
       messageId: messageId,
+      points,
       x1: src.x + 45,
       y1: src.y + 24,
       x2: dst.x + 45,
@@ -1627,36 +1800,7 @@ function syncTopologyPositions() {
     }
   });
 
-  // 2. 同步所有连线端点绝对坐标
-  if (state.systemData?.topology?.links) {
-    linksGroup.innerHTML = "";
-    state.systemData.topology.links.forEach((link) => {
-      const srcId = Array.isArray(link.endpoint_a) ? link.endpoint_a[0] : link.endpoint_a;
-      const dstId = Array.isArray(link.endpoint_b) ? link.endpoint_b[0] : link.endpoint_b;
-      const srcCoord = NODE_COORDINATES[srcId];
-      const dstCoord = NODE_COORDINATES[dstId];
-      if (!srcCoord || !dstCoord) return;
-
-      const x1 = srcCoord.x + 45;
-      const y1 = srcCoord.y + 24;
-      const x2 = dstCoord.x + 45;
-      const y2 = dstCoord.y + 24;
-
-      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      line.setAttribute("x1", x1);
-      line.setAttribute("y1", y1);
-      line.setAttribute("x2", x2);
-      line.setAttribute("y2", y2);
-      line.setAttribute("class", `topo-link ${link.link_type || "wired"}`);
-      line.setAttribute("data-link-id", link.link_id || "");
-
-      const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-      title.textContent = `${srcId} ↔ ${dstId} (${link.link_type || "wired"})`;
-      line.appendChild(title);
-
-      linksGroup.appendChild(line);
-    });
-  }
+  renderTopologyLinks();
 }
 
 function showSubView() {

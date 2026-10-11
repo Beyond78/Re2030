@@ -209,6 +209,8 @@ def validate_scenario(config: ScenarioConfig) -> List[str]:
 
     _validate_observation_references(config, errors)
     _validate_layout(config, errors)
+    from sim2030.deployment import validate_deployment
+    validate_deployment(config, errors)
     return errors
 
 
