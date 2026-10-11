@@ -81,10 +81,10 @@
       </div>
 
       <div class="auto-driver-box">
-        <div class="playback-speed-label"><label for="playback-rate">推演速度</label><output id="playback-rate-value" for="playback-rate">1 步/秒</output></div>
-        <input type="range" id="playback-rate" min="0" max="4" step="1" value="1" aria-valuetext="每秒 1 步">
-        <div class="playback-speed-ticks" aria-hidden="true"><span>0.5</span><span>1</span><span>2</span><span>5</span><span>10</span></div>
-        <p id="playback-speed-hint" class="playback-hint">每步 100ms · 目标每秒推进 0.1 秒</p>
+        <div class="playback-speed-label"><label for="playback-rate">推演倍速</label><output id="playback-rate-value" for="playback-rate">0.125×</output></div>
+        <input type="range" id="playback-rate" min="0" max="3" step="1" value="0" aria-valuetext="0.125 倍速">
+        <div class="playback-speed-ticks" aria-hidden="true"><span>0.125×</span><span>0.25×</span><span>0.5×</span><span>1×</span></div>
+        <p id="playback-speed-hint" class="playback-hint">可在推演中随时调整倍速</p>
         <button class="btn btn-outline btn-block" id="btn-single-step" disabled>单步推进 (+100ms)</button>
         <p id="playback-state-hint" class="playback-hint" role="status">加载场景后开始推演</p>
       </div>

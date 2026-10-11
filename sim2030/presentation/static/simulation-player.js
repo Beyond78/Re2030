@@ -1,4 +1,4 @@
-/* 单请求步进调度器：速度表示目标步数/秒，耗时过长时不积压补发。 */
+/* 单请求步进调度器：倍速以原有每秒一步为基准，耗时过长时不积压补发。 */
 "use strict";
 
 class SimulationPlayer {
@@ -15,7 +15,7 @@ class SimulationPlayer {
     this.runId = null;
     this.status = "idle";
     this.dtUs = 100000;
-    this.rate = 1;
+    this.rate = 0.125;
     this.busy = false;
     this.enabled = false;
     this.timer = null;
@@ -57,7 +57,7 @@ class SimulationPlayer {
   }
 
   setRate(rate) {
-    if (![0.5, 1, 2, 5, 10].includes(rate)) throw new Error("不支持的推演速度");
+    if (![0.125, 0.25, 0.5, 1].includes(rate)) throw new Error("不支持的推演速度");
     this.rate = rate;
     this._clearTimer();
     if (this.running && !this.inFlight && !this.busy) this._schedule(1000 / rate);

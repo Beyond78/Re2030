@@ -40,12 +40,12 @@ test('start automatically schedules steps; no independent automatic switch', asy
   assert.equal(f.jobs.size,1);
   await f.clock.next();
   assert.deepEqual(actions(f),['start','step']);
-  assert.equal([...f.jobs.values()][0].delay,1000);
+  assert.equal([...f.jobs.values()][0].delay,8000);
 });
 
 test('speed changes replace a pending timer instead of creating parallel loops', async()=>{
   const f=fixture(); await f.player.command('start');
-  for(const rate of [.5,1,2,5,10]) {
+  for(const rate of [.125,.25,.5,1]) {
     f.player.setRate(rate);
     assert.equal(f.jobs.size,1);
     assert.equal([...f.jobs.values()][0].delay,1000/rate);
@@ -76,15 +76,15 @@ test('changing speed during a slow step waits for that request to finish', async
   const f=fixture(action=>action==='step'?gate:Promise.resolve());
   await f.player.command('start');
   const tick=f.clock.next(); await flush();
-  f.player.setRate(10);
+  f.player.setRate(1);
   assert.equal(f.jobs.size,0); assert.equal(f.calls.length,2);
   release(); await tick;
-  assert.equal(f.jobs.size,1); assert.equal([...f.jobs.values()][0].delay,100);
+  assert.equal(f.jobs.size,1); assert.equal([...f.jobs.values()][0].delay,1000);
 });
 
 test('slow transport never queues catch-up steps', async()=>{
   const f=fixture(action=>{if(action==='step') f.clock.time+=1500;});
-  f.player.setRate(10); await f.player.command('start'); await f.clock.next();
+  f.player.setRate(1); await f.player.command('start'); await f.clock.next();
   assert.deepEqual(actions(f),['start','step']);
   assert.equal(f.jobs.size,1); assert.equal([...f.jobs.values()][0].delay,0);
 });
@@ -138,12 +138,12 @@ test('finished steps stop the driver without scheduling a new request', async()=
 });
 
 test('stale run observations are ignored; new runs retain selected speed but stay ready', async()=>{
-  const f=fixture(); f.player.setRate(5);
+  const f=fixture(); f.player.setRate(.5);
   f.player.bind('run-2');
   f.player.observe({run_id:'run-1',status:'finished',dt_us:300000});
   assert.equal(f.player.status,'ready'); assert.equal(f.player.dtUs,100000);
   f.player.observe({run_id:'run-2',status:'ready',dt_us:200000});
-  assert.equal(f.player.dtUs,200000); assert.equal(f.player.rate,5); assert.equal(f.jobs.size,0);
+  assert.equal(f.player.dtUs,200000); assert.equal(f.player.rate,.5); assert.equal(f.jobs.size,0);
 });
 
 test('run replacement cannot proceed while a step is in flight', async()=>{
@@ -154,4 +154,11 @@ test('run replacement cannot proceed while a step is in flight', async()=>{
   const pause=f.player.command('pause'); release(); await tick; await pause;
   f.player.bind('run-2'); assert.equal(f.jobs.size,0);
   assert.ok(f.calls.every(c=>c.runId==='run-1'));
+});
+
+test('only the four slow-motion multipliers are accepted and the default is 0.125x', ()=>{
+  const f=fixture();
+  assert.equal(f.player.rate,.125);
+  for(const rate of [.125,.25,.5,1]) f.player.setRate(rate);
+  for(const rate of [0,.1,2,5,10]) assert.throws(()=>f.player.setRate(rate));
 });

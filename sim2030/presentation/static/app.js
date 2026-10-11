@@ -215,7 +215,7 @@ async function loadScenarios() {
   setStatus(`已就绪，发现场景 ${state.scenarios.length} 个`);
 }
 
-const PLAYBACK_RATES = [0.5, 1, 2, 5, 10];
+const PLAYBACK_RATES = [0.125, 0.25, 0.5, 1];
 const simulationPlayer = new SimulationPlayer({
   send: (action, runId) => api("POST", `/api/runs/${runId}/operations`, {
     request_id: `play-${crypto.randomUUID()}`,
@@ -247,9 +247,9 @@ function renderPlaybackControls() {
   $("#btn-single-step").disabled = !player.runId || locked || !["ready", "paused"].includes(player.status);
   $("#btn-single-step").textContent = `单步推进 (+${player.dtUs / 1000}ms)`;
   $("#create-run").disabled = !state.selectedScenario || locked;
-  $("#playback-rate-value").textContent = `${player.rate} 步/秒`;
-  $("#playback-rate").setAttribute("aria-valuetext", `每秒 ${player.rate} 步`);
-  $("#playback-speed-hint").textContent = `每步 ${player.dtUs / 1000}ms · 目标每秒推进 ${Number((player.rate * player.dtUs / 1000000).toFixed(3))} 秒`;
+  $("#playback-rate-value").textContent = `${player.rate}×`;
+  $("#playback-rate").setAttribute("aria-valuetext", `${player.rate} 倍速`);
+  $("#playback-speed-hint").textContent = "可在推演中随时调整倍速";
   $("#playback-state-hint").textContent = !player.runId ? "加载场景后开始推演" : player.terminal ? "本次推演已结束，可重新加载场景" :
     player.error ? "自动推进已中断，可继续重试" : player.running ? "按所选速度自动推进" :
     player.status === "paused" ? "已暂停，可继续或单步查看" : "点击开始，按所选速度自动推进";
