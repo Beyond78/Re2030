@@ -27,6 +27,9 @@ const state = {
 };
 
 const $ = (selector) => document.querySelector(selector);
+const cyberDemo = new CyberDemo();
+let cyberDemoAnimationStart = 0;
+let cyberDemoPaths = [];
 
 function esc(value) {
   if (value === null || value === undefined) return "";
@@ -597,7 +600,96 @@ async function refreshViews() {
     renderOtherView(view, payload.data || {});
   }
   renderNetworkInspector(data);
+  renderCyberDemo(data);
   return true;
+}
+
+function selectCyberDemoPhase(index) {
+  cyberDemo.select(index);
+  if (document.body.classList.contains("topology-expanded")) setTopologyExpanded(false);
+  renderCyberDemo(state.systemData || {});
+}
+
+function renderCyberDemo(data) {
+  cyberDemo.sync(data);
+  const controls = $("#cyber-demo-controls");
+  const detail = $("#cyber-demo-detail");
+  const layer = $("#topo-cyber-demo");
+  controls.hidden = detail.hidden = !cyberDemo.active;
+  if (!cyberDemo.active) {
+    layer.replaceChildren();
+    delete layer.dataset.renderKey;
+    cyberDemoPaths = [];
+    return;
+  }
+  const key = `${cyberDemo.key}:${cyberDemo.phase}`;
+  if (layer.dataset.renderKey === key) return;
+  layer.dataset.renderKey = key;
+  cyberDemoAnimationStart = animClock;
+  const config = cyberDemo.config, stage = cyberDemo.stage;
+  const count = config.stages.length;
+  controls.innerHTML = `<div class="cyber-demo-heading"><h3>网络攻击演示</h3><span>前端展示</span></div>
+    <p class="cyber-demo-topic">${esc(config.title)}</p>
+    <label for="cyber-demo-phase" class="cyber-demo-label">攻击演示阶段</label>
+    <select id="cyber-demo-phase" class="form-select">${config.stages.map((item, i) => `<option value="${i}" ${i === cyberDemo.phase ? 'selected' : ''}>${i + 1}. ${esc(item.title)}</option>`).join("")}</select>
+    <div class="cyber-demo-progress" aria-hidden="true">${config.stages.map((_, i) => `<span class="${i <= cyberDemo.phase ? 'active' : ''}"></span>`).join("")}</div>
+    <p class="cyber-demo-summary">${esc(stage.summary)}</p>
+    <div class="cyber-demo-navigation"><button type="button" id="cyber-demo-prev" class="btn btn-secondary" ${cyberDemo.phase === 0 ? 'disabled' : ''}>上一阶段</button>
+    <button type="button" id="cyber-demo-next" class="btn btn-primary" ${cyberDemo.phase === count - 1 ? 'disabled' : ''}>下一阶段</button></div>
+    <button type="button" id="cyber-demo-reset" class="cyber-demo-reset">从头查看</button>`;
+  $("#cyber-demo-phase").addEventListener("change", event => selectCyberDemoPhase(Number(event.target.value)));
+  $("#cyber-demo-prev").addEventListener("click", () => selectCyberDemoPhase(cyberDemo.phase - 1));
+  $("#cyber-demo-next").addEventListener("click", () => selectCyberDemoPhase(cyberDemo.phase + 1));
+  $("#cyber-demo-reset").addEventListener("click", () => selectCyberDemoPhase(0));
+  detail.innerHTML = `<div class="cyber-demo-heading"><h3>攻击情景说明</h3><span>${cyberDemo.phase + 1} / ${count}</span></div>
+    <div class="cyber-demo-boundary">${esc(config.boundary)}</div>
+    <h4>${esc(stage.title)}</h4><p>${esc(stage.detail)}</p>
+    <div class="cyber-demo-evidence-title">${cyberDemo.phase >= 5 ? '可核验线索 / 处置建议' : '本阶段关注点'}</div>
+    <ul>${(stage.evidence || []).map(item => `<li>${esc(item)}</li>`).join("")}</ul>
+    <p class="cyber-demo-assumption">${esc(config.assumption)}</p>
+    <details class="cyber-demo-references"><summary>资料依据</summary>${(config.references || []).filter(ref => /^https:\/\//.test(ref.url)).map(ref => `<a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">${esc(ref.title)}</a>`).join("")}</details>`;
+
+  const plan = cyberDemo.plan(state.networkModel, NODE_COORDINATES);
+  layer.replaceChildren();
+  const namespace = "http://www.w3.org/2000/svg";
+  cyberDemoPaths = plan.paths.map(route => {
+    const path = document.createElementNS(namespace, "path");
+    path.setAttribute("d", NetworkTopology.pathData(route.points));
+    path.setAttribute("class", `cyber-demo-path ${route.kind}`);
+    path.setAttribute("marker-end", `url(#cyber-${route.kind === 'command' ? 'command' : 'observation'}-arrow)`);
+    path.dataset.demoRoute = route.id;
+    layer.appendChild(path);
+    const particle = document.createElementNS(namespace, "circle");
+    particle.setAttribute("r", "4");
+    particle.setAttribute("class", `cyber-demo-particle ${route.kind}`);
+    layer.appendChild(particle);
+    return { points: route.points, particle };
+  });
+  plan.marks.forEach(mark => {
+    const group = document.createElementNS(namespace, "g");
+    group.setAttribute("class", `cyber-demo-mark ${mark.role}`);
+    group.dataset.demoTarget = mark.id;
+    group.innerHTML = `<rect x="${mark.x - 4}" y="${mark.y - 4}" width="${mark.width + 8}" height="${mark.height + 8}" rx="9" />
+      <text x="${mark.x}" y="${mark.y - 10}">${esc(mark.label)}</text>`;
+    layer.appendChild(group);
+  });
+  if (plan.paths.length) {
+    const label = document.createElementNS(namespace, "text");
+    label.setAttribute("x", "25"); label.setAttribute("y", "310");
+    label.setAttribute("class", "cyber-demo-path-label");
+    label.textContent = "虚线高亮为演示路径";
+    layer.appendChild(label);
+  }
+  animateCyberDemo();
+}
+
+function animateCyberDemo() {
+  cyberDemoPaths.forEach(({ points, particle }, i) => {
+    const progress = ((animClock - cyberDemoAnimationStart) / 1700 + 0.25 + i * 0.18) % 1;
+    const p = NetworkTopology.pointAt(points, progress);
+    particle.setAttribute("cx", p.x);
+    particle.setAttribute("cy", p.y);
+  });
 }
 
 /* 更新顶部态势指标条 */
@@ -1543,6 +1635,7 @@ function animateParticles(now) {
   const isRunning = state.systemData?.status === "running" && simulationPlayer.running;
   if (isRunning) animClock += delta * simulationPlayer.rate;
   const clock = animClock;
+  animateCyberDemo();
 
   const packetLayer = $("#topo-packets");
   if (packetLayer) {

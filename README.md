@@ -17,7 +17,8 @@
 - `sim2030/recognition/`：识别引擎与单域/关联检测器接口。
 - `sim2030/defense/`：防御策略选择、动作跟踪与恢复判据。
 - `sim2030/presentation/`：标准库 HTTP 服务、展示视图与静态页面。
-- `scenarios/substation-live.json`：当前唯一 10kV 变电站场景。
+- `scenarios/substation-live.json`：基础 10kV 变电站场景。
+- `scenarios/substation-network-attack.json`：基于基础场景的网络攻击前端展示。
 - `tests/`：使用标准库 `unittest` 的回归测试。
 - `main.py`：无界面运行入口或演示平面入口。
 
@@ -41,6 +42,10 @@ D:\python\python.exe main.py --ui --scenario scenarios/substation-live.json --ou
 倍速滑块仅提供 0.125×、0.25×、0.5×、1×，默认 0.125×。1× 沿用原来的每秒一步；四档分别每 8、4、2、1 秒推进一步。每步的仿真时间仍由场景 `dt_us` 决定。
 暂停后可继续或单步推进；停止会结束本次运行，需要重新加载场景才能再次开始。
 调速时不会积压步进请求，实际速度受浏览器和后端处理速度影响。
+
+“变电站网络攻击场景（展示）”提供未授权控制命令的分阶段示意。加载后可在左侧选择攻击演示阶段，
+查看命令路径、潜在执行风险及 IDS 可核验线索。阶段选择不会执行攻击、改变设备状态或生成真实告警。
+资料依据与实现范围见 [网络攻击展示场景依据](docs/网络攻击展示场景依据.md)。
 
 演示平面提供以下最小接口：
 

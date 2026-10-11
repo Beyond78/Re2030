@@ -89,6 +89,8 @@
         <p id="playback-state-hint" class="playback-hint" role="status">加载场景后开始推演</p>
       </div>
 
+      <section id="cyber-demo-controls" class="cyber-demo-panel" aria-label="网络攻击演示" hidden></section>
+
       <div class="section-title">设备控制面板</div>
       <div id="device-control-panel" class="device-control-panel">
         <div class="device-control-empty">请在拓扑中点选设备</div>
@@ -184,6 +186,12 @@
         <div id="topo-viewport" class="topo-viewport">
         <svg id="topo-svg" class="topo-svg" viewBox="0 0 920 780" preserveAspectRatio="xMidYMid meet">
           <defs>
+            <marker id="cyber-command-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#fb7185" />
+            </marker>
+            <marker id="cyber-observation-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#c4b5fd" />
+            </marker>
             <marker id="monitor-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#a78bfa" />
             </marker>
@@ -215,6 +223,7 @@
           <g id="topo-packets" class="topo-packets-layer"></g>
 
           <!-- 拓扑设备节点图层 -->
+          <g id="topo-cyber-demo" aria-label="网络攻击演示路径"></g>
           <g id="topo-nodes" class="topo-nodes-layer"></g>
           <!-- 交换机、镜像口与安全监测设备 -->
           <g id="topo-network-assets"></g>
@@ -230,6 +239,7 @@
 
     <!-- 右侧：常态监控详情与动态事件 -->
     <aside class="panel side-panel right-panel">
+      <section id="cyber-demo-detail" class="cyber-demo-detail" aria-label="攻击情景说明" hidden></section>
       <section id="network-inspector" class="network-inspector" aria-label="网络安全监测">
         <div class="panel-header"><h2>网络安全监测</h2><span class="network-mode">旁路 IDS</span></div>
         <div id="network-inspector-body"><div class="monitor-empty">加载场景后查看采集点与接口</div></div>

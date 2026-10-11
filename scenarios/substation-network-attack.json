@@ -1,0 +1,1159 @@
+{
+  "scenario_id": "substation-network-attack",
+  "name": "变电站网络攻击场景（展示）",
+  "observation_mode": "file_replay",
+  "seed": 2030,
+  "simulation": {
+    "dt_us": 100000,
+    "duration_us": 86400000000
+  },
+  "environment": {
+    "nominal_voltage_kv": 10.0,
+    "load_active_mw": 2.0,
+    "load_reactive_mvar": 0.5,
+    "ambient_temp_c": 30.0,
+    "random_seed": 42,
+    "electrical": {
+      "tap_asset": "tap",
+      "compensation_asset": "comp",
+      "breaker_asset": "brk",
+      "cooling_asset": "cool",
+      "tap_step_ratio": 0.02,
+      "nominal_tap": 5,
+      "cap_voltage_boost_kv": 0.2
+    }
+  },
+  "devices": [
+    {
+      "device_id": "station",
+      "layout": {
+        "x": 285,
+        "y": 180
+      },
+      "device_type": "station_control",
+      "layer": "station",
+      "name": "站端监控系统",
+      "ports": {
+        "mc_breaker": "mc",
+        "prot": "prot",
+        "peer": "peer"
+      },
+      "parameters": {
+        "dispatch": {
+          "brk": "mc_breaker",
+          "tap": "mc_breaker",
+          "cool": "mc_breaker"
+        }
+      }
+    },
+    {
+      "device_id": "mc",
+      "layout": {
+        "x": 330,
+        "y": 356
+      },
+      "device_type": "measurement_control",
+      "layer": "bay",
+      "name": "测控装置",
+      "ports": {
+        "up": "up",
+        "mu": "mu",
+        "brk_cmd": "brk_cmd",
+        "tap_cmd": "tap_cmd",
+        "cool_cmd": "cool_cmd"
+      },
+      "parameters": {
+        "mu_port": "mu",
+        "command_ports": {
+          "close": "brk_cmd",
+          "open": "brk_cmd",
+          "set_tap": "tap_cmd",
+          "start": "cool_cmd",
+          "stop": "cool_cmd"
+        },
+        "allowed_actions": [
+          "close",
+          "open",
+          "set_tap",
+          "start",
+          "stop"
+        ],
+        "report_interval_us": 100000
+      }
+    },
+    {
+      "device_id": "prot",
+      "layout": {
+        "x": 195,
+        "y": 356
+      },
+      "device_type": "overcurrent_protection",
+      "layer": "bay",
+      "name": "过流保护装置",
+      "ports": {
+        "in": "in",
+        "out": "out",
+        "up": "up"
+      },
+      "parameters": {
+        "in_port": "in",
+        "out_port": "out",
+        "up_port": "up",
+        "eval_interval_us": 100000,
+        "overcurrent_threshold_a": 200.0,
+        "duration_ticks": 2,
+        "value_key": "ct_current"
+      }
+    },
+    {
+      "device_id": "ctl_brk",
+      "layout": {
+        "x": 60,
+        "y": 588
+      },
+      "device_type": "control_interface",
+      "layer": "process",
+      "name": "断路器智能终端",
+      "ports": {
+        "up": "up",
+        "down": "down"
+      },
+      "parameters": {
+        "up_port": "up",
+        "down_port": "down"
+      }
+    },
+    {
+      "device_id": "ctl_tap",
+      "layout": {
+        "x": 195,
+        "y": 588
+      },
+      "device_type": "control_interface",
+      "layer": "process",
+      "name": "分接机构控制接口",
+      "ports": {
+        "up": "up",
+        "down": "down"
+      },
+      "parameters": {
+        "up_port": "up",
+        "down_port": "down"
+      }
+    },
+    {
+      "device_id": "ctl_cool",
+      "layout": {
+        "x": 330,
+        "y": 588
+      },
+      "device_type": "control_interface",
+      "layer": "process",
+      "name": "冷却系统控制接口",
+      "ports": {
+        "up": "up",
+        "down": "down"
+      },
+      "parameters": {
+        "up_port": "up",
+        "down_port": "down"
+      }
+    },
+    {
+      "device_id": "brk",
+      "layout": {
+        "x": 60,
+        "y": 728
+      },
+      "device_type": "switch",
+      "layer": "process",
+      "name": "断路器",
+      "ports": {
+        "control": "control",
+        "physical": "physical"
+      },
+      "parameters": {
+        "control_port": "control",
+        "initial_position": "open"
+      },
+      "capabilities": [
+        {
+          "action_type": "close",
+          "readable_state": [
+            "position"
+          ]
+        },
+        {
+          "action_type": "open",
+          "readable_state": [
+            "position"
+          ]
+        },
+        {
+          "action_type": "trip",
+          "readable_state": [
+            "position"
+          ]
+        }
+      ]
+    },
+    {
+      "device_id": "tap",
+      "layout": {
+        "x": 195,
+        "y": 728
+      },
+      "device_type": "transformer",
+      "layer": "process",
+      "name": "变压器",
+      "ports": {
+        "control": "control",
+        "physical": "physical"
+      },
+      "parameters": {
+        "control_port": "control",
+        "nominal_tap": 5,
+        "initial_oil_temp_c": 40.0
+      },
+      "capabilities": [
+        {
+          "action_type": "set_tap",
+          "parameter_ranges": {
+            "tap_position": [
+              1,
+              9
+            ]
+          },
+          "readable_state": [
+            "tap_position",
+            "oil_temp_c"
+          ]
+        }
+      ]
+    },
+    {
+      "device_id": "cool",
+      "layout": {
+        "x": 330,
+        "y": 728
+      },
+      "device_type": "auxiliary",
+      "layer": "process",
+      "name": "冷却风机",
+      "ports": {
+        "control": "control",
+        "physical": "physical"
+      },
+      "parameters": {
+        "control_port": "control",
+        "initial_running": false
+      },
+      "capabilities": [
+        {
+          "action_type": "start",
+          "readable_state": [
+            "running"
+          ]
+        },
+        {
+          "action_type": "stop",
+          "readable_state": [
+            "running"
+          ]
+        }
+      ]
+    },
+    {
+      "device_id": "comp",
+      "layout": {
+        "x": 735,
+        "y": 588
+      },
+      "device_type": "compensation",
+      "layer": "process",
+      "name": "无功补偿支路",
+      "ports": {
+        "control": "control",
+        "physical": "physical"
+      },
+      "parameters": {
+        "control_port": "control",
+        "initial_connected": false
+      },
+      "capabilities": [
+        {
+          "action_type": "connect",
+          "readable_state": [
+            "connected"
+          ]
+        },
+        {
+          "action_type": "disconnect",
+          "readable_state": [
+            "connected"
+          ]
+        }
+      ]
+    },
+    {
+      "device_id": "ct_current",
+      "layout": {
+        "x": 600,
+        "y": 728
+      },
+      "device_type": "sensor",
+      "layer": "process",
+      "name": "电流互感器",
+      "ports": {
+        "up": "up"
+      },
+      "parameters": {
+        "input_key": "line_current_a",
+        "unit": "A",
+        "sample_interval_us": 100000
+      }
+    },
+    {
+      "device_id": "vt_voltage",
+      "layout": {
+        "x": 735,
+        "y": 728
+      },
+      "device_type": "sensor",
+      "layer": "process",
+      "name": "电压互感器",
+      "ports": {
+        "up": "up"
+      },
+      "parameters": {
+        "input_key": "bus_voltage_kv",
+        "unit": "kV",
+        "sample_interval_us": 100000
+      }
+    },
+    {
+      "device_id": "oil_temp",
+      "layout": {
+        "x": 465,
+        "y": 728
+      },
+      "device_type": "sensor",
+      "layer": "process",
+      "name": "油温传感器",
+      "ports": {
+        "up": "up",
+        "physical": "physical"
+      },
+      "parameters": {
+        "input_key": "oil_temp_c",
+        "unit": "C",
+        "sample_interval_us": 1000000
+      }
+    },
+    {
+      "device_id": "mu",
+      "layout": {
+        "x": 600,
+        "y": 588
+      },
+      "device_type": "acquisition",
+      "layer": "process",
+      "name": "合并单元",
+      "ports": {
+        "in": "in",
+        "out": "out"
+      },
+      "parameters": {
+        "report_interval_us": 100000,
+        "out_port": "out",
+        "output_business_type": "sampling"
+      }
+    },
+    {
+      "device_id": "time_svc",
+      "layout": {
+        "x": 600,
+        "y": 180
+      },
+      "device_type": "time_service",
+      "layer": "station",
+      "name": "授时系统",
+      "ports": {
+        "sync": "sync",
+        "gnss": "gnss"
+      },
+      "parameters": {
+        "sync_port": "sync",
+        "sync_interval_us": 1000000,
+        "time_source": "gnss"
+      }
+    },
+    {
+      "device_id": "gnss_sat",
+      "layout": {
+        "x": 600,
+        "y": 80
+      },
+      "device_type": "time_satellite",
+      "layer": "external",
+      "name": "授时卫星",
+      "ports": {
+        "down": "down"
+      },
+      "parameters": {
+        "down_port": "down",
+        "sync_interval_us": 500000,
+        "constellation": "BDS"
+      },
+      "initial_state": {
+        "signal_state": "locked",
+        "visible_satellites": 8
+      }
+    },
+    {
+      "device_id": "peer_station",
+      "layout": {
+        "x": 285,
+        "y": 80
+      },
+      "device_type": "remote_substation",
+      "layer": "external",
+      "name": "其他电站",
+      "ports": {
+        "down": "down"
+      },
+      "parameters": {
+        "down_port": "down",
+        "heartbeat_interval_us": 1000000
+      },
+      "initial_state": {
+        "grid_state": "normal",
+        "breaker_position": "closed",
+        "bus_voltage_kv": 110.0
+      }
+    }
+  ],
+  "links": [
+    {
+      "link_id": "L-station-mc",
+      "endpoint_a": [
+        "station",
+        "mc_breaker"
+      ],
+      "endpoint_b": [
+        "mc",
+        "up"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 1000
+      }
+    },
+    {
+      "link_id": "L-mu-mc",
+      "endpoint_a": [
+        "mu",
+        "out"
+      ],
+      "endpoint_b": [
+        "mc",
+        "mu"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 500
+      }
+    },
+    {
+      "link_id": "L-mu-prot",
+      "endpoint_a": [
+        "mu",
+        "out"
+      ],
+      "endpoint_b": [
+        "prot",
+        "in"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 500
+      }
+    },
+    {
+      "link_id": "L-ct-mu",
+      "endpoint_a": [
+        "ct_current",
+        "up"
+      ],
+      "endpoint_b": [
+        "mu",
+        "in"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 200
+      }
+    },
+    {
+      "link_id": "L-vt-mu",
+      "endpoint_a": [
+        "vt_voltage",
+        "up"
+      ],
+      "endpoint_b": [
+        "mu",
+        "in"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 200
+      }
+    },
+    {
+      "link_id": "L-oil-mu",
+      "endpoint_a": [
+        "oil_temp",
+        "up"
+      ],
+      "endpoint_b": [
+        "mu",
+        "in"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 200
+      }
+    },
+    {
+      "link_id": "L-mc-brk",
+      "endpoint_a": [
+        "mc",
+        "brk_cmd"
+      ],
+      "endpoint_b": [
+        "ctl_brk",
+        "up"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 1000
+      }
+    },
+    {
+      "link_id": "L-mc-tap",
+      "endpoint_a": [
+        "mc",
+        "tap_cmd"
+      ],
+      "endpoint_b": [
+        "ctl_tap",
+        "up"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 1000
+      }
+    },
+    {
+      "link_id": "L-mc-cool",
+      "endpoint_a": [
+        "mc",
+        "cool_cmd"
+      ],
+      "endpoint_b": [
+        "ctl_cool",
+        "up"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 1000
+      }
+    },
+    {
+      "link_id": "L-prot-brk",
+      "endpoint_a": [
+        "prot",
+        "out"
+      ],
+      "endpoint_b": [
+        "ctl_brk",
+        "up"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 800
+      }
+    },
+    {
+      "link_id": "L-prot-station",
+      "endpoint_a": [
+        "prot",
+        "up"
+      ],
+      "endpoint_b": [
+        "station",
+        "prot"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 1000
+      }
+    },
+    {
+      "link_id": "L-ctl-brk-down",
+      "endpoint_a": [
+        "ctl_brk",
+        "down"
+      ],
+      "endpoint_b": [
+        "brk",
+        "control"
+      ],
+      "link_type": "hardwire",
+      "parameters": {
+        "delay_us": 0
+      }
+    },
+    {
+      "link_id": "L-ctl-tap-down",
+      "endpoint_a": [
+        "ctl_tap",
+        "down"
+      ],
+      "endpoint_b": [
+        "tap",
+        "control"
+      ],
+      "link_type": "hardwire",
+      "parameters": {
+        "delay_us": 0
+      }
+    },
+    {
+      "link_id": "L-ctl-cool-down",
+      "endpoint_a": [
+        "ctl_cool",
+        "down"
+      ],
+      "endpoint_b": [
+        "cool",
+        "control"
+      ],
+      "link_type": "hardwire",
+      "parameters": {
+        "delay_us": 0
+      }
+    },
+    {
+      "link_id": "L-tap-oil",
+      "endpoint_a": [
+        "tap",
+        "physical"
+      ],
+      "endpoint_b": [
+        "oil_temp",
+        "physical"
+      ],
+      "link_type": "physical"
+    },
+    {
+      "link_id": "L-brk-tap",
+      "endpoint_a": [
+        "brk",
+        "physical"
+      ],
+      "endpoint_b": [
+        "tap",
+        "physical"
+      ],
+      "link_type": "electrical"
+    },
+    {
+      "link_id": "L-time-mu",
+      "endpoint_a": [
+        "time_svc",
+        "sync"
+      ],
+      "endpoint_b": [
+        "mu",
+        "in"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 200
+      }
+    },
+    {
+      "link_id": "L-gnss-time_svc",
+      "endpoint_a": [
+        "gnss_sat",
+        "down"
+      ],
+      "endpoint_b": [
+        "time_svc",
+        "gnss"
+      ],
+      "link_type": "wireless",
+      "parameters": {
+        "delay_us": 20000,
+        "loss_rate": 0.0
+      }
+    },
+    {
+      "link_id": "L-peer-station",
+      "endpoint_a": [
+        "peer_station",
+        "down"
+      ],
+      "endpoint_b": [
+        "station",
+        "peer"
+      ],
+      "link_type": "wireless",
+      "parameters": {
+        "delay_us": 5000,
+        "loss_rate": 0.0
+      }
+    }
+  ],
+  "operations": [
+    {
+      "time_us": 200000,
+      "target_asset_id": "brk",
+      "action_type": "close"
+    }
+  ],
+  "layout": {
+    "layers": [
+      {
+        "key": "external",
+        "title": "外部信号与站间业务",
+        "x": 12,
+        "y": 44,
+        "width": 840,
+        "height": 94
+      },
+      {
+        "key": "station",
+        "title": "站控层",
+        "x": 12,
+        "y": 150,
+        "width": 840,
+        "height": 94
+      },
+      {
+        "key": "bay",
+        "title": "间隔层",
+        "x": 12,
+        "y": 322,
+        "width": 840,
+        "height": 98
+      },
+      {
+        "key": "process",
+        "title": "过程层",
+        "x": 12,
+        "y": 550,
+        "width": 840,
+        "height": 262
+      }
+    ],
+    "deployment": {
+      "profile": "separate-station-process-networks",
+      "name": "站控网与过程网分设交换机",
+      "networks": [
+        {
+          "id": "station",
+          "name": "站控网",
+          "description": "监控与保护测控装置的站控侧接口",
+          "switch": {
+            "id": "sw-station",
+            "name": "站控网交换机",
+            "x": 890,
+            "y": 253,
+            "width": 142,
+            "height": 64
+          },
+          "probe": {
+            "id": "ids-station",
+            "name": "站控网 IDS",
+            "x": 1070,
+            "y": 253,
+            "width": 155,
+            "height": 64,
+            "interface_id": "span-station",
+            "source_id": "ids-station",
+            "capture_interface": "CAP0",
+            "management_interface": "MGMT"
+          },
+          "mirror_port": "SPAN1",
+          "mirror_direction": "both",
+          "connections": [
+            {
+              "device_id": "station",
+              "interface_id": "ETH-ST",
+              "switch_port": "P1",
+              "anchor_x": 45,
+              "anchor_y": 48,
+              "business_ports": [
+                "mc_breaker",
+                "prot"
+              ]
+            },
+            {
+              "device_id": "prot",
+              "interface_id": "ETH-ST",
+              "switch_port": "P2",
+              "anchor_x": 25,
+              "anchor_y": 0,
+              "business_ports": [
+                "up"
+              ]
+            },
+            {
+              "device_id": "mc",
+              "interface_id": "ETH-ST",
+              "switch_port": "P3",
+              "anchor_x": 25,
+              "anchor_y": 0,
+              "business_ports": [
+                "up"
+              ]
+            }
+          ],
+          "link_ids": [
+            "L-station-mc",
+            "L-prot-station"
+          ]
+        },
+        {
+          "id": "process",
+          "name": "过程网",
+          "description": "保护测控装置的过程侧接口、采集单元与控制接口",
+          "switch": {
+            "id": "sw-process",
+            "name": "过程网交换机",
+            "x": 890,
+            "y": 438,
+            "width": 142,
+            "height": 90
+          },
+          "probe": {
+            "id": "ids-process",
+            "name": "过程网 IDS",
+            "x": 1070,
+            "y": 451,
+            "width": 155,
+            "height": 64,
+            "interface_id": "span-process",
+            "source_id": "ids-process",
+            "capture_interface": "CAP0",
+            "management_interface": "MGMT"
+          },
+          "mirror_port": "SPAN1",
+          "mirror_direction": "both",
+          "connections": [
+            {
+              "device_id": "prot",
+              "interface_id": "ETH-PR",
+              "switch_port": "P1",
+              "anchor_x": 65,
+              "anchor_y": 48,
+              "business_ports": [
+                "in",
+                "out"
+              ]
+            },
+            {
+              "device_id": "mc",
+              "interface_id": "ETH-PR",
+              "switch_port": "P2",
+              "anchor_x": 65,
+              "anchor_y": 48,
+              "business_ports": [
+                "mu",
+                "brk_cmd",
+                "tap_cmd",
+                "cool_cmd"
+              ]
+            },
+            {
+              "device_id": "ctl_brk",
+              "interface_id": "ETH-PR",
+              "switch_port": "P3",
+              "anchor_x": 45,
+              "anchor_y": 0,
+              "business_ports": [
+                "up"
+              ]
+            },
+            {
+              "device_id": "ctl_tap",
+              "interface_id": "ETH-PR",
+              "switch_port": "P4",
+              "anchor_x": 45,
+              "anchor_y": 0,
+              "business_ports": [
+                "up"
+              ]
+            },
+            {
+              "device_id": "ctl_cool",
+              "interface_id": "ETH-PR",
+              "switch_port": "P5",
+              "anchor_x": 45,
+              "anchor_y": 0,
+              "business_ports": [
+                "up"
+              ]
+            },
+            {
+              "device_id": "mu",
+              "interface_id": "ETH-PR",
+              "switch_port": "P6",
+              "anchor_x": 45,
+              "anchor_y": 0,
+              "business_ports": [
+                "out"
+              ]
+            }
+          ],
+          "link_ids": [
+            "L-mu-mc",
+            "L-mu-prot",
+            "L-mc-brk",
+            "L-mc-tap",
+            "L-mc-cool",
+            "L-prot-brk"
+          ]
+        }
+      ],
+      "direct_links": {
+        "L-ct-mu": {
+          "role": "measurement",
+          "label": "传感器采集接线"
+        },
+        "L-vt-mu": {
+          "role": "measurement",
+          "label": "传感器采集接线"
+        },
+        "L-oil-mu": {
+          "role": "measurement",
+          "label": "传感器采集接线"
+        },
+        "L-time-mu": {
+          "role": "timing",
+          "label": "专用对时连接"
+        },
+        "L-tap-oil": {
+          "role": "physical",
+          "label": "变压器与油温传感器的热耦合",
+          "points": [
+            {
+              "x": 240,
+              "y": 776
+            },
+            {
+              "x": 240,
+              "y": 798
+            },
+            {
+              "x": 510,
+              "y": 798
+            },
+            {
+              "x": 510,
+              "y": 776
+            }
+          ]
+        }
+      },
+      "manager": {
+        "id": "security-manager",
+        "name": "安全监测平台",
+        "x": 1070,
+        "y": 680,
+        "width": 155,
+        "height": 72
+      }
+    },
+    "cyber_demo": {
+      "mode": "presentation_only",
+      "title": "未授权控制命令",
+      "subtitle": "站控主机受控后发出非计划分闸请求",
+      "source_device_id": "station",
+      "target_device_id": "brk",
+      "assumption": "情景假设：攻击者已获得站控主机的操作能力。",
+      "boundary": "前端情景展示：不发送攻击报文，不修改设备状态，不生成真实 IDS 告警。",
+      "references": [
+        {
+          "title": "INL：2015 年乌克兰电网攻击分析",
+          "url": "https://cyote.inl.gov/content/uploads/24/2025/12/CyOTE-Case-Study_Ukraine-2015.pdf"
+        },
+        {
+          "title": "MITRE ATT&CK：未授权控制命令",
+          "url": "https://attack.mitre.org/techniques/T0855/"
+        }
+      ],
+      "stages": [
+        {
+          "title": "正常基线",
+          "summary": "先观察正常的量测上送和控制关系。",
+          "detail": "这张拓扑沿用基础场景。点击下一阶段，逐步查看攻击起点、命令路径与监测线索。",
+          "routes": [],
+          "cables": [],
+          "marks": [],
+          "evidence": [
+            "合法操作的来源、授权与时序可作为核验依据。"
+          ]
+        },
+        {
+          "title": "主机受控",
+          "summary": "假设站控主机被攻击者控制。",
+          "detail": "攻击从已有站控主机的操作能力开始。这里不展示主机入侵过程，也不把互联网直接接到过程网。",
+          "routes": [],
+          "cables": [],
+          "marks": [
+            {
+              "id": "station",
+              "role": "source",
+              "label": "假设：主机受控"
+            }
+          ],
+          "evidence": [
+            "可核对异常登录、远程会话与主机审计记录。"
+          ]
+        },
+        {
+          "title": "异常命令",
+          "summary": "站控主机发出非计划分闸请求。",
+          "detail": "红色路径沿站控侧接口经过站控网交换机到达测控装置。相同来源也可能发送合法命令，需要结合操作授权判定。",
+          "routes": [
+            "L-station-mc"
+          ],
+          "cables": [],
+          "marks": [
+            {
+              "id": "station",
+              "role": "source",
+              "label": "攻击起点（示意）"
+            },
+            {
+              "id": "mc",
+              "role": "target",
+              "label": "异常控制请求"
+            }
+          ],
+          "evidence": [
+            "示例动作：非计划分闸。",
+            "核对命令来源、操作授权和控制时序。"
+          ]
+        },
+        {
+          "title": "命令下传",
+          "summary": "展示控制请求可能沿过程网向下传递。",
+          "detail": "测控装置通过独立的过程侧接口，经过程网交换机把命令送至断路器智能终端。此路径按本项目的控制模型组织。",
+          "routes": [
+            "L-station-mc",
+            "L-mc-brk"
+          ],
+          "cables": [],
+          "marks": [
+            {
+              "id": "station",
+              "role": "source",
+              "label": "攻击起点（示意）"
+            },
+            {
+              "id": "mc",
+              "role": "target",
+              "label": "命令转发（示意）"
+            },
+            {
+              "id": "ctl_brk",
+              "role": "target",
+              "label": "目标控制接口"
+            }
+          ],
+          "evidence": [
+            "将站控侧请求与过程侧控制动作关联核验。"
+          ]
+        },
+        {
+          "title": "执行风险",
+          "summary": "非计划控制可能造成误分闸。",
+          "detail": "最后一段是智能终端到断路器的控制硬接线。橙色边框表示潜在风险；节点内的分合闸状态仍显示基础仿真的实际状态。",
+          "routes": [
+            "L-station-mc",
+            "L-mc-brk",
+            "L-ctl-brk-down"
+          ],
+          "cables": [],
+          "marks": [
+            {
+              "id": "brk",
+              "role": "risk",
+              "label": "误分闸风险（示意）"
+            },
+            {
+              "id": "station",
+              "role": "source",
+              "label": "攻击起点（示意）"
+            }
+          ],
+          "evidence": [
+            "核对开关状态、操作记录与业务影响。",
+            "本阶段没有实际执行分闸，也没有伪造设备反馈。"
+          ]
+        },
+        {
+          "title": "监测线索",
+          "summary": "IDS 从交换机镜像口获得可分析的流量。",
+          "detail": "紫色路径表示流量镜像，橙色框标出本阶段涉及的监测点。以下是可核验的线索，不能据此宣称 IDS 已经检出攻击。",
+          "routes": [],
+          "cables": [
+            "station:mirror",
+            "process:mirror"
+          ],
+          "marks": [
+            {
+              "id": "ids-station",
+              "role": "watch",
+              "label": "监测点（示意）"
+            },
+            {
+              "id": "ids-process",
+              "role": "watch",
+              "label": "监测点（示意）"
+            }
+          ],
+          "evidence": [
+            "检查异常连接、非预期命令和业务操作顺序。",
+            "受控合法主机可能沿用原有通信关系，需结合主机日志与操作授权。"
+          ]
+        },
+        {
+          "title": "核验与处置",
+          "summary": "汇总线索，核对授权并按预案处理。",
+          "detail": "监测结果经独立管理口上报。处置应经过核验与授权，图中不会让 IDS 自动控制断路器。",
+          "routes": [],
+          "cables": [
+            "station:management",
+            "process:management"
+          ],
+          "marks": [
+            {
+              "id": "security-manager",
+              "role": "watch",
+              "label": "核验与处置（示意）"
+            }
+          ],
+          "evidence": [
+            "核验可疑操作及其业务影响。",
+            "按预案处理异常会话，复核设备状态并保留证据。"
+          ]
+        }
+      ]
+    }
+  }
+}

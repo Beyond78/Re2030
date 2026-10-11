@@ -143,3 +143,54 @@ const NetworkTopology = (() => {
 })();
 
 if (typeof module !== "undefined") module.exports = NetworkTopology;
+
+/* 网络攻击情景的只读展示模型。阶段选择不调用业务、攻击或观测接口。 */
+"use strict";
+
+class CyberDemo {
+  constructor() {
+    this.key = "";
+    this.config = null;
+    this.phase = 0;
+  }
+
+  sync(data) {
+    const config = data.topology?.layout?.cyber_demo;
+    const key = `${data.run_id || ""}:${JSON.stringify(config || null)}`;
+    if (key === this.key) return false;
+    this.key = key;
+    this.config = config?.mode === "presentation_only" && Array.isArray(config.stages) && config.stages.length ? config : null;
+    this.phase = 0;
+    return true;
+  }
+
+  get active() { return Boolean(this.config); }
+  get stage() { return this.config?.stages[this.phase] || null; }
+
+  select(index) {
+    if (!this.active || !Number.isInteger(index)) return;
+    this.phase = Math.max(0, Math.min(this.config.stages.length - 1, index));
+  }
+
+  plan(network, coordinates) {
+    if (!this.stage || !network) return { paths: [], marks: [] };
+    const paths = [];
+    for (const id of this.stage.routes || []) {
+      const route = network.routes.get(id);
+      if (route) paths.push({ id, kind: "command", points: route.points });
+    }
+    for (const id of this.stage.cables || []) {
+      const cable = network.cables.find(item => item.id === id);
+      if (cable) paths.push({ id, kind: "observation", points: cable.points });
+    }
+    const marks = (this.stage.marks || []).flatMap(mark => {
+      const asset = network.assets.find(item => item.id === mark.id);
+      const device = coordinates[mark.id];
+      const box = asset || (device ? { ...device, width: 90, height: 48 } : null);
+      return box ? [{ ...mark, x: box.x, y: box.y, width: box.width, height: box.height }] : [];
+    });
+    return { paths, marks };
+  }
+}
+
+if (typeof module !== "undefined") module.exports.CyberDemo = CyberDemo;
