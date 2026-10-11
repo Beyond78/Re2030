@@ -657,8 +657,8 @@ function gooseHistoryChart(history, key, label, unit, color) {
 function receiverRows(rows, emptyText) {
   return rows.length ? rows.map(row => `<div class="receiver-row ${esc(row.status)}">
     <div><b>${esc(row.label)}</b><span>${esc(gooseDecisionLabel(row.status))}</span></div>
-    <small>${esc(row.source)} · APPID 0x${Number(row.appid).toString(16)} · st/sq ${row.stNum}/${row.sqNum} · trip=${row.trip}</small>
-    <p>${esc(row.reason)}${row.delay_us == null ? '' : ` · ${(row.delay_us / 1000).toFixed(2)} ms`}</p>
+    <small>${row.kind === "control" ? `${esc(deviceName(row.source))} · 控制命令 · ${esc(zhAction(row.action))}` : `${esc(row.source)} · APPID 0x${Number(row.appid).toString(16)} · st/sq ${row.stNum}/${row.sqNum} · trip=${row.trip}`}</small>
+    <p>${esc(row.reason)}${row.delay_us == null ? '' : ` · ${(row.delay_us / 1000).toFixed(2)} ms`}</p>${row.queue_on_arrival == null ? "" : `<small>到达时占用 ${row.queue_on_arrival}/${row.capacity_on_arrival}</small>`}
   </div>`).join('') : `<p class="capture-muted">${emptyText}</p>`;
 }
 
@@ -679,7 +679,7 @@ function renderGooseReceiver(data) {
   $("#receiver-apply").disabled = !!state.savingReceiver || simulationPlayer.terminal;
   const live = $("#receiver-live"), counts = receiver.counts;
   const queuedScroll = live.querySelector('.receiver-frame-list')?.scrollTop || 0;
-  live.innerHTML = `<div class="goose-queue-label"><b>接收队列</b><span>${receiver.occupancy} / ${receiver.settings.queue_capacity} 帧</span></div>
+  live.innerHTML = `<div class="goose-queue-label"><b>共享接收队列</b><span>${receiver.occupancy} / ${receiver.settings.queue_capacity} 帧</span></div>
     <meter min="0" max="${receiver.settings.queue_capacity}" value="${receiver.occupancy}" aria-label="智能终端接收队列占用"></meter>
     <p class="capture-muted">入口过滤：${receiver.settings.policy === 'validated' ? '已启用' : '关闭'} · 当前处理速率 ${receiver.settings.service_fps} 帧/秒<br>队列峰值 ${receiver.peak} 帧 · 传输中 ${receiver.pending} 帧</p>
     <div class="goose-receiver-counts"><span>接受 <b>${counts.accepted || 0}</b></span><span>过滤 <b>${counts.filtered || 0}</b></span><span>拒绝 <b>${counts.rejected || 0}</b></span><span>队满丢弃 <b>${counts.dropped || 0}</b></span><span>过期 <b>${counts.stale || 0}</b></span></div>

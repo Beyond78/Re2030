@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter, deque
+from dataclasses import replace
 from pathlib import Path
 
 from sim2030.constants import BusinessType
@@ -67,6 +68,9 @@ class GooseLab:
         self.time_us = -1
         self._event_buckets = set()
         self._feedback_ids = set()
+        self.control_messages = {}
+        self.pending_controls = []
+        self.open_cause = None
         self.manual_frames = {}
         self.manual_pending = []
         self.manual_sent = 0
@@ -79,6 +83,44 @@ class GooseLab:
             self.dos_capture = capture
         elif (dos_dir / "capture-index.json").is_file():
             self.dos_capture = GooseCapture(dos_dir)
+
+    def receive_control(self, message, now, engine):
+        """将正常网络控制命令纳入同一 FIFO；不是把它伪装成原始 GOOSE 帧。"""
+        terminal = engine.get_device("ctl_brk")
+        if (message.receiver_id != "ctl_brk" or message.business_type != BusinessType.COMMAND
+                or message.target_port != terminal.up_port):
+            return False
+        number = -len(self.control_messages) - 1
+        self.control_messages[number] = message
+        payload = message.payload or {}
+        request_id = payload.get("request_id") or message.related_request or message.message_id
+        action = payload.get("action_type", "")
+        label = {"open": "分闸", "close": "合闸", "trip": "跳闸"}.get(action, action)
+        self.counts["received"] += 1
+        occupied, capacity = len(self.queue), self.settings["queue_capacity"]
+        self.decisions[number] = {"frame_no": number, "kind": "control", "label": f"{label}命令 #{-number}",
+                                  "source": message.sender_id, "request_id": request_id, "action": action,
+                                  "message_id": message.message_id, "arrival_time_us": now,
+                                  "arrival_order": self.counts["received"], "queue_on_arrival": occupied,
+                                  "capacity_on_arrival": capacity, "status": "queued", "reason": "等待共享接收队列处理"}
+        if occupied >= capacity:
+            reason = f"到达时接收队列已满（{occupied}/{capacity}），{label}命令未执行"
+            self._finish(number, now, "dropped", reason)
+            status = "rejected"
+        else:
+            end = max(now, self.queue[-1][0] if self.queue else now) + self.service_us
+            self.queue.append((end, number))
+            self.max_queue = max(self.max_queue, len(self.queue))
+            reason = f"{label}命令已入队，等待处理（入队前 {occupied}/{capacity}）"
+            self._event(now, "control_queued", reason)
+            status = "queued"
+        # 通过智能终端原有上行反馈通道返回测控/站控端。
+        terminal.receive(Message(message_id=f"queue-feedback-{message.message_id}",
+                                 sender_id="receiver-queue", receiver_id="ctl_brk", business_type=BusinessType.FEEDBACK,
+                                 related_request=request_id, created_time_us=now,
+                                 payload={"request_id": request_id, "action_id": request_id, "status": status,
+                                          "reason": reason, "action_type": action}))
+        return True
 
     def frame_record(self, number):
         return self.manual_frames[number]["record"] if number in self.manual_frames else self.capture.records[number - 1]
@@ -136,6 +178,8 @@ class GooseLab:
 
     def receiver_row(self, number):
         decision = self.decisions[number]
+        if number in self.control_messages:
+            return dict(decision)
         frame = self.frame_record(number)
         manual = self.manual_frames.get(number)
         return {**decision, "label": f"下发 #{number - len(self.capture.records)}" if manual else f"基线 #{number}",
@@ -187,7 +231,7 @@ class GooseLab:
         if coalesce and key in self._event_buckets:
             return
         self._event_buckets.add(key)
-        event = {"time_us": time_us, "kind": kind, "text": text, "frame_no": frame_no if frame_no not in self.manual_frames else None}
+        event = {"time_us": time_us, "kind": kind, "text": text, "frame_no": frame_no if frame_no not in self.manual_frames and frame_no not in self.control_messages else None}
         self.events.append(event)
         self.pending_records.append({"type": "event", **event})
 
@@ -204,6 +248,10 @@ class GooseLab:
                         delay_us=now - decision["arrival_time_us"])
         self.max_delay_us = max(self.max_delay_us, decision["delay_us"])
         self.counts[status] += 1
+        if number in self.control_messages:
+            self.pending_records.append({"type": "decision", "time_us": now, **decision})
+            self._event(now, "control_ready" if status == "accepted" else "control_failed", reason)
+            return
         frame = self.frame_record(number)
         if status == "accepted" and frame.get("src_mac") not in self.publishers:
             self.counts["unlisted_accepted"] += 1
@@ -222,6 +270,10 @@ class GooseLab:
         while self.queue and self.queue[0][0] <= until:
             now, number = self.queue.popleft()
             self._expire(now)
+            if number in self.control_messages:
+                self._finish(number, now, "accepted", "共享接收处理完成，设备动作另行反馈")
+                self.pending_controls.append(number)
+                continue
             frame = self.frame_record(number)
             goose = frame.get("goose", {})
             if not self._subscription(frame):
@@ -287,6 +339,7 @@ class GooseLab:
                                       "status": "queued", "reason": "等待接收处理"}
             self.counts["received"] += 1
             self.decisions[number]["arrival_order"] = self.counts["received"]
+            self.decisions[number].update(queue_on_arrival=len(self.queue), capacity_on_arrival=self.settings["queue_capacity"])
             self.observed_records.append(frame)
             self.observed_points.append({"time_us": arrival})
             self._observation_batch.append((number, arrival))
@@ -304,6 +357,15 @@ class GooseLab:
             self.queue.append((end, number))
             self.max_queue = max(self.max_queue, len(self.queue))
         self._complete_until(now)
+        for number in self.pending_controls:
+            original = self.control_messages[number]
+            # 原指令时间只作为记录；动作计时从排队处理完成后的转交时刻开始。
+            payload = {**(original.payload or {}), "original_created_time_us": original.created_time_us,
+                       "receiver_arrival_time_us": self.decisions[number]["arrival_time_us"],
+                       "receiver_processed_time_us": self.decisions[number]["decision_time_us"]}
+            engine.get_device("ctl_brk").receive(replace(original, created_time_us=now, payload=payload))
+            self._event(now, "control_forwarded", f"{self.decisions[number]['label']}离开接收队列，转交执行")
+        self.pending_controls.clear()
         for number, accepted_us in self.pending_trips:
             request_id = f"goose-frame-{number}"
             engine.get_device("ctl_brk").receive(Message(
@@ -321,7 +383,14 @@ class GooseLab:
         closed = engine.get_device("brk").physical_outputs()["closed"]
         if self.was_closed and not closed:
             self.opened_us = now
-            self._event(now, "breaker", "断路器实际分闸，线路电流与供电功率归零", self.first_trip_frame)
+            completed_ids = {message.payload.get("action_id") for message in result.messages
+                             if message.sender_id == "brk" and message.business_type == BusinessType.FEEDBACK
+                             and message.payload.get("status") == "completed" and message.created_time_us == now}
+            control = next((decision for decision in self.decisions.values()
+                            if decision.get("kind") == "control" and decision.get("request_id") in completed_ids), None)
+            self.open_cause = "control" if control else "goose"
+            self._event(now, "breaker", "断路器执行遥控分闸，线路电流与供电功率归零" if control else "断路器实际分闸，线路电流与供电功率归零",
+                        None if control else self.first_trip_frame)
         self.was_closed = closed
         env = engine._environment.snapshot()
         self.history.append({"time_us": now, "current_a": env["line_current_a"],
@@ -331,7 +400,9 @@ class GooseLab:
             if (message.sender_id == "brk" and message.business_type == BusinessType.FEEDBACK
                     and message.payload.get("status") == "completed" and message.message_id not in self._feedback_ids):
                 self._feedback_ids.add(message.message_id)
-                self._event(now, "feedback", "断路器发出动作完成反馈", self.first_trip_frame)
+                is_control = any(decision.get("kind") == "control" and decision.get("request_id") == message.payload.get("action_id")
+                                 for decision in self.decisions.values())
+                self._event(now, "feedback", "断路器发出动作完成反馈", None if is_control else self.first_trip_frame)
 
     def view(self, engine):
         env = engine._environment.snapshot()
@@ -342,6 +413,8 @@ class GooseLab:
             if start is not None and self.opened_us is not None and self.opened_us >= start:
                 delayed = elapsed > self.settings["trip_deadline_us"]
                 outcome, severity = ("故障延迟切除", "warning") if delayed else ("故障切除", "normal")
+            elif self.open_cause == "control":
+                outcome, severity = "遥控分闸已完成，线路停止供电", "warning"
             else:
                 outcome, severity = "无故障跳闸，线路失去供电", "danger"
         elif self.fault_started:
@@ -359,7 +432,7 @@ class GooseLab:
                 "outcome": outcome, "severity": severity, "breaker_closed": closed,
                 "fault_active": bool(env.get("fault_active")), "fault_duration_us": elapsed if self.fault_started else 0,
                 "opened_us": self.opened_us, "first_trip_frame": self.first_trip_frame,
-                "trip_latency_us": self.opened_us - self.decisions[self.first_trip_frame]["arrival_time_us"] if self.opened_us is not None and self.first_trip_frame else None,
+                "trip_latency_us": self.opened_us - self.decisions[self.first_trip_frame]["arrival_time_us"] if self.opened_us is not None and self.first_trip_frame and self.open_cause != "control" else None,
                 "trip_dispatched_us": self.trip_dispatched_us,
                 "current_a": env["line_current_a"], "power_mw": env["active_power_mw"],
                 "history": self.history[-80:], "events": sorted(self.events, key=lambda e: e["time_us"])[-24:]}

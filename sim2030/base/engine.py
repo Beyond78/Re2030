@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from sim2030.constants import BusinessType, LinkType
 from sim2030.contracts import (
@@ -41,6 +41,7 @@ class SimulationEngine:
         self._entry_id: str = ""
         self._device_specs: List[DeviceSpec] = []
         self._link_specs: List[LinkSpec] = []
+        self.message_handler: Optional[Callable[[Message, int], bool]] = None
 
     # ──────────────────────────────────────────────
     # 装配
@@ -52,6 +53,7 @@ class SimulationEngine:
         environment_config: Dict[str, Any],
         entry_id: str = "",
     ) -> None:
+        self.message_handler = None
         self._device_specs = list(device_specs)
         self._link_specs = list(link_specs)
         self._entry_id = entry_id or self._default_entry_id(device_specs)
@@ -226,7 +228,10 @@ class SimulationEngine:
         for message in self._network.deliver_due(time_us):
             device = self._devices.get(message.receiver_id)
             if device is not None:
-                device.receive(message)
+                # 接收实验可接管指定终端的入站消息；处理完成后再交给设备。
+                handled = self.message_handler(message, time_us) if self.message_handler else False
+                if not handled:
+                    device.receive(message)
                 result.messages.append(message)
 
         for device in self._devices.values():

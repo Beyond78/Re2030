@@ -166,6 +166,9 @@ def build_receiver_view(records, query=None):
     displayed = []
     for row in rows[:limit]:
         number = row["frame_no"]
+        if row.get("kind") == "control":
+            displayed.append(row)
+            continue
         message = manual.get(number)
         frame = message["payload"]["record"] if message else capture.records[number - 1]
         displayed.append({**row, "label": f"下发 #{number - len(capture.records)}" if message else f"基线 #{number}",

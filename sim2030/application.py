@@ -125,6 +125,7 @@ class Application:
 
         self.engine.build(config.devices, config.links, config.environment)
         if self.goose_lab:
+            self.engine.message_handler = lambda message, now: self.goose_lab.receive_control(message, now, self.engine)
             self.engine.refresh_environment(0, self.dt_us)
 
         self.config_path = os.path.abspath(config_path)
