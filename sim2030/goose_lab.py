@@ -11,6 +11,8 @@ from sim2030.goose_capture import SAMPLES, GooseCapture, epoch_us, iso_time, obs
 
 
 PROFILES = {"normal": 5000, "limited": 100}
+# 手动下发帧使用负编号，且与接收队列控制命令（-1、-2…）分属不同编号段，避免与循环回放的基线帧编号冲突。
+MANUAL_ID_BASE = 1_000_000
 FAULT_STARTS = {"normal": 900000, "forgery": None, "suppression": 1100000, "dos": 900000}
 
 
@@ -47,6 +49,14 @@ class GooseLab:
 
     def __init__(self, capture, settings):
         self.capture, self.settings = capture, dict(settings)
+        if not capture.records:
+            raise ValueError("样本没有可回放的帧，无法建立接收实验")
+        self.baseline_count = len(capture.records)
+        if self.baseline_count >= 2:
+            spacing = capture.times[-1] - capture.times[-2]
+            self.cycle_us = max(1, capture.times[-1] + max(0, spacing))
+        else:
+            self.cycle_us = max(1, capture.times[0]) if capture.times else 1
         self.expected = capture.manifest["goose_config"]
         self.publishers = set(capture.meta["baseline"]["publishers"].get(self.expected["gocbRef"], []))
         if not self.publishers:
@@ -130,7 +140,9 @@ class GooseLab:
         return True
 
     def frame_record(self, number):
-        return self.manual_frames[number]["record"] if number in self.manual_frames else self.capture.records[number - 1]
+        if number in self.manual_frames:
+            return self.manual_frames[number]["record"]
+        return self.capture.records[(number - 1) % self.baseline_count]
 
     def dispatch(self, request_id, now, dt_us, count=1, flood=False, suppression=False):
         if suppression:
@@ -149,7 +161,7 @@ class GooseLab:
         for index_in_batch in range(count):
             index = capture.attack_indices[self.manual_sent % len(capture.attack_indices)]
             self.manual_sent += 1
-            number = len(self.capture.records) + self.manual_sent
+            number = -(MANUAL_ID_BASE + self.manual_sent)
             frame = capture.records[index]
             message = Message(message_id=f"{request_id}:{index_in_batch + 1}", sender_id="sw-process", receiver_id="ctl_brk",
                               business_type="goose_attack", source_port="injection", target_port="up",
@@ -157,6 +169,7 @@ class GooseLab:
                               payload={"protocol": "GOOSE", "attack_frame": True, "sample_frame_no": index + 1,
                                        "sample": capture.meta["sample"], "record": frame, "batch_id": request_id,
                                        "batch_count": count, "batch_index": index_in_batch + 1, "receiver_frame_no": number,
+                                       "manual_ordinal": self.manual_sent,
                                        "note": "手动下发的样本帧实例；原始采集时间保留在 record 内"}).to_record()
             self.manual_frames[number] = {"record": frame, "message": message}
             self.manual_pending.append((message["deliver_time_us"], number))
@@ -195,13 +208,20 @@ class GooseLab:
         self._event(now, "receiver_config", f"终端配置更新：容量 {capacity} 帧，速率 {rate} 帧/秒，入口过滤{'启用' if enabled else '关闭'}")
         return {"status": "accepted", "settings": dict(self.settings)}
 
+    def baseline_label(self, number):
+        """循环回放的基线帧按样本内位置和轮次标注，编号本身会随轮次增长。"""
+        position = (number - 1) % self.baseline_count + 1
+        lap = (number - 1) // self.baseline_count + 1
+        return f"基线 #{position}" + (f"（第{lap}轮）" if lap > 1 else "")
+
     def receiver_row(self, number):
         decision = self.decisions[number]
         if number in self.control_messages:
             return dict(decision)
         frame = self.frame_record(number)
         manual = self.manual_frames.get(number)
-        return {**decision, "label": f"下发 #{number - len(self.capture.records)}" if manual else f"基线 #{number}",
+        ordinal = manual["message"]["payload"].get("manual_ordinal") if manual else None
+        return {**decision, "label": f"下发 #{ordinal}" if manual else self.baseline_label(number),
                 "source": "交换机" if manual else "保护装置", "appid": frame["appid"],
                 "stNum": frame["goose"].get("stNum"), "sqNum": frame["goose"].get("sqNum"),
                 "trip": frame["dataset"][0][0], "message_id": manual["message"]["message_id"] if manual else None}
@@ -346,8 +366,13 @@ class GooseLab:
             self.fault_started = True
             self._event(fault_start, "fault", "实验故障投入：合闸时线路电流设为 900 A")
         arrivals = []
-        while self.cursor < len(self.capture.index) and self.capture.times[self.cursor] <= now:
-            number, arrival = self.cursor + 1, self.capture.times[self.cursor]
+        # 基线样本循环回放：走完一整个样本后回到第 1 帧，按样本周期顺延到下一轮。
+        while True:
+            index = self.cursor % self.baseline_count
+            arrival = (self.cursor // self.baseline_count) * self.cycle_us + self.capture.times[index]
+            if arrival > now:
+                break
+            number = self.cursor + 1
             self.cursor += 1
             if self.frame_record(number).get("src_mac") == "00:0c:29:66:00:66":
                 self.decisions[number] = {"frame_no": number, "status": "not_sent", "reason": "样本攻击帧未自动投入，请点击交换机手动下发"}

@@ -161,6 +161,7 @@ def build_receiver_view(records, query=None):
     rows = sorted((row for row in decisions.values() if before is None or row["arrival_order"] < before),
                   key=lambda row: row["arrival_order"], reverse=True)
     capture = GooseCapture(reader.manifest()["observation_base_dir"])
+    total = max(1, len(capture.records))
     manual = {message.get("payload", {}).get("receiver_frame_no"): message
               for message in reader.read("business") if message.get("business_type") == "goose_attack"}
     displayed = []
@@ -170,9 +171,16 @@ def build_receiver_view(records, query=None):
             displayed.append(row)
             continue
         message = manual.get(number)
-        frame = message["payload"]["record"] if message else capture.records[number - 1]
-        displayed.append({**row, "label": f"下发 #{number - len(capture.records)}" if message else f"基线 #{number}",
-                          "source": "交换机" if message else "保护装置", "appid": frame["appid"],
+        if message:
+            # 手动下发帧用负编号，标签按下发序号还原，不受基线循环编号增长影响。
+            frame, source = message["payload"]["record"], "交换机"
+            ordinal = message["payload"].get("manual_ordinal")
+            label = f"下发 #{ordinal if ordinal is not None else abs(number)}"
+        else:
+            frame, source = capture.records[(number - 1) % total], "保护装置"
+            position, lap = (number - 1) % total + 1, (number - 1) // total + 1
+            label = f"基线 #{position}" + (f"（第{lap}轮）" if lap > 1 else "")
+        displayed.append({**row, "label": label, "source": source, "appid": frame["appid"],
                           "stNum": frame["goose"]["stNum"], "sqNum": frame["goose"]["sqNum"],
                           "trip": frame["dataset"][0][0]})
     result.update(rows=displayed, has_older=len(rows) > limit,

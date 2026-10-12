@@ -8,6 +8,7 @@ import zipfile
 
 from sim2030.goose_codec import parse_goose_frame
 from sim2030.goose_capture import GooseCapture, read_pcap, reference_checks, normal_baseline
+from sim2030.goose_lab import GooseLab
 from sim2030.base.observations import FileObservationSource, validate_observation_event
 from sim2030.application import Application
 from sim2030.presentation.server import PresentationServer
@@ -47,7 +48,10 @@ def sample_package(path, corrupt=False):
             records.append(parse_goose_frame(raw, ORIGIN + us / 1000000, i, "test/CB-IN"))
         log = ("\n".join(json.dumps(row) for row in records) + "\n").encode()
         manifest = {"frame_count": len(records), "base_time_utc": ORIGIN, "capture_point": "test/CB-IN",
-                    "goose_config": {"publisher": "保护", "subscriber": "智能终端"}, "data_set": [{"name": "trip"}]}
+                    "goose_config": {"publisher": "保护", "subscriber": "智能终端",
+                                     "gocbRef": "PROT/LLN0$GO$gcbTrip", "datSet": "PROT/LLN0$dsTrip",
+                                     "confRev": 1, "appid": 12289, "vlan_id": 3},
+                    "data_set": [{"name": "trip"}]}
         contents[f"communication-log-{sample}.jsonl"] = log
         contents[f"readback-{sample}.jsonl"] = log
         contents[f"goose-{sample}.pcap"] = pcap
@@ -162,6 +166,43 @@ class TestGooseCapture(unittest.TestCase):
             self.assertEqual(replay["visible_frames"], 4)
         finally:
             app.close()
+
+    def lab(self, sample="forgery"):
+        settings = {"sample": sample, "policy": "basic", "capacity": "normal", "service_fps": 5000,
+                    "queue_capacity": 64, "fault_start_us": None, "fault_current_a": 900,
+                    "trip_deadline_us": 400000, "manual_dispatch": True}
+        return GooseLab(GooseCapture(self.data / sample), settings)
+
+    def test_baseline_replay_loops_after_sample_end(self):
+        capture = GooseCapture(self.data / "forgery")
+        lab = self.lab()
+        self.assertEqual(lab.baseline_count, 4)
+        # 虚拟帧编号越过样本长度后按取模映射回样本内帧，攻击帧每个轮次都保持未自动投入。
+        self.assertEqual(lab.frame_record(5), capture.records[0])
+        self.assertEqual(lab.frame_record(9), capture.records[0])
+        self.assertEqual(lab.frame_record(8), capture.records[3])
+        now = 0
+        for _ in range(40):
+            now += 100000
+            lab.advance(now, None)
+        self.assertGreater(lab.cursor, 4)
+        self.assertGreater(lab.counts["received"], 4)
+        self.assertEqual(lab.decisions[2]["status"], "not_sent")
+        self.assertEqual(lab.decisions[6]["status"], "not_sent")
+
+    def test_manual_frame_ids_do_not_collide_with_looped_baseline(self):
+        lab = self.lab()
+        receipt = lab.dispatch("batch-1", 0, 100000)
+        self.assertEqual(receipt["status"], "accepted")
+        self.assertEqual(lab.manual_sent, 1)
+        manual_numbers = list(lab.manual_frames)
+        self.assertEqual(len(manual_numbers), 1)
+        self.assertLess(manual_numbers[0], 0)
+        self.assertNotIn(manual_numbers[0], range(1, lab.baseline_count + 1))
+        lab.advance(200000, None)
+        row = lab.receiver_row(manual_numbers[0])
+        self.assertEqual(row["label"], "下发 #1")
+        self.assertEqual(row["source"], "交换机")
 
     def test_failed_sample_load_preserves_existing_run(self):
         app = Application(output_root=str(self.root / "runs"))
