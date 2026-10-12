@@ -57,7 +57,7 @@ class SimulationPlayer {
   }
 
   setRate(rate) {
-    if (![0.125, 0.25, 0.5, 1].includes(rate)) throw new Error("不支持的推演速度");
+    if (![0.125, 0.25, 0.5, 1, 2, 5].includes(rate)) throw new Error("不支持的推演速度");
     this.rate = rate;
     this._clearTimer();
     if (this.running && !this.inFlight && !this.busy) this._schedule(1000 / rate);

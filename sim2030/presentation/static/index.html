@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>国家重点研发计划2030 · 感控系统安全态势大屏</title>
-  <link rel="stylesheet" href="/style.css?v=20261012-layout8">
+  <link rel="stylesheet" href="/style.css?v=20261012-playback3">
 </head>
 <body>
   <!-- 顶部状态栏 -->
@@ -74,20 +74,7 @@
         </div>
       </div>
 
-      <div class="section-title">推演控制</div>
-      <div class="control-btn-group">
-        <button class="btn btn-control playback-toggle" id="btn-run-toggle" aria-pressed="false" disabled>▶ 开始推演</button>
-        <button class="btn btn-control" data-action="stop" id="btn-stop" title="结束本次推演" disabled>停止</button>
-      </div>
-
-      <div class="auto-driver-box">
-        <div class="playback-speed-label"><label for="playback-rate">推演倍速</label><output id="playback-rate-value" for="playback-rate">0.125×</output></div>
-        <input type="range" id="playback-rate" min="0" max="3" step="1" value="0" aria-valuetext="0.125 倍速">
-        <div class="playback-speed-ticks" aria-hidden="true"><span>0.125×</span><span>0.25×</span><span>0.5×</span><span>1×</span></div>
-        <p id="playback-speed-hint" class="playback-hint">可在推演中随时调整倍速</p>
-        <button class="btn btn-outline btn-block" id="btn-single-step" disabled>单步推进 (+100ms)</button>
-        <p id="playback-state-hint" class="playback-hint" role="status">加载场景后开始推演</p>
-      </div>
+      <!-- 推演控制已移到拓扑画布上的悬浮层（#playback-overlay），可拖拽、可收起 -->
 
       <section id="cyber-demo-controls" class="cyber-demo-panel" aria-label="网络攻击演示" hidden></section>
 
@@ -254,6 +241,31 @@
         </div>
       </div>
 
+      <!-- 推演控制悬浮层：半透明可拖拽，展开拓扑时仍可使用 -->
+      <div id="playback-overlay" class="playback-overlay" data-collapsed="0">
+        <div class="playback-handle" id="playback-handle" title="按住拖动调整位置">
+          <span class="playback-grip" aria-hidden="true"></span>
+          <span class="playback-title">推演控制</span>
+          <span class="playback-status" id="playback-status" role="status" aria-live="polite">未开始</span>
+          <button type="button" id="playback-overlay-toggle" class="playback-collapse" aria-expanded="true" aria-controls="playback-overlay-body" title="收起或展开">⌄</button>
+        </div>
+        <div id="playback-overlay-body" class="playback-body">
+          <div class="playback-actions">
+            <button class="pb-btn pb-primary" id="btn-run-toggle" aria-pressed="false" aria-label="开始推演" title="开始推演" disabled>▶ 开始</button>
+            <button class="pb-btn" id="btn-stop" data-action="stop" aria-label="停止推演" title="停止推演" disabled>■</button>
+            <button class="pb-btn" id="btn-single-step" aria-label="单步推进" title="单步推进" disabled>⏭</button>
+          </div>
+          <div class="playback-speeds" id="playback-speeds" role="group" aria-label="推演倍速">
+            <button type="button" class="pb-speed" data-rate="0.125" aria-pressed="true">0.125×</button>
+            <button type="button" class="pb-speed" data-rate="0.25" aria-pressed="false">0.25×</button>
+            <button type="button" class="pb-speed" data-rate="0.5" aria-pressed="false">0.5×</button>
+            <button type="button" class="pb-speed" data-rate="1" aria-pressed="false">1×</button>
+            <button type="button" class="pb-speed" data-rate="2" aria-pressed="false">2×</button>
+            <button type="button" class="pb-speed" data-rate="5" aria-pressed="false">5×</button>
+          </div>
+        </div>
+      </div>
+
       <!-- 其它TAB视图的展示容器 -->
       <div id="sub-view-container" class="sub-view-container" style="display:none;">
         <div id="view-content" class="view-content"></div>
@@ -308,7 +320,7 @@
   <div id="packet-inspector-toast" class="packet-inspector-toast" role="status" aria-live="polite"></div>
 
   <script src="/network-topology.js?v=20261011"></script>
-  <script src="/simulation-player.js?v=20261011"></script>
-  <script src="/app.js?v=20261012-layout8"></script>
+  <script src="/simulation-player.js?v=20261012-playback3"></script>
+  <script src="/app.js?v=20261012-playback3"></script>
 </body>
 </html>

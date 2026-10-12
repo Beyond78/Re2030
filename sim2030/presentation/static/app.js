@@ -232,7 +232,7 @@ async function loadScenarios() {
   setStatus(`已就绪，发现场景 ${state.scenarios.length} 个`);
 }
 
-const PLAYBACK_RATES = [0.125, 0.25, 0.5, 1];
+const PLAYBACK_RATES = [0.125, 0.25, 0.5, 1, 2, 5];
 const simulationPlayer = new SimulationPlayer({
   send: (action, runId) => api("POST", `/api/runs/${runId}/operations`, {
     request_id: `play-${crypto.randomUUID()}`,
@@ -256,20 +256,25 @@ function renderPlaybackControls() {
   const toggle = $("#btn-run-toggle");
   const locked = state.loadingRun || player.busy || state.sendingAttackFrame;
   toggle.disabled = !player.runId || locked || player.terminal;
-  toggle.textContent = locked ? "处理中…" : player.terminal ? "推演已结束" : player.running ? "❚❚ 暂停推演" :
-    player.status === "ready" || player.status === "idle" ? "▶ 开始推演" : "▶ 继续推演";
+  toggle.textContent = locked ? "处理中…" : player.terminal ? "已结束" : player.running ? "❚❚ 暂停" : player.status === "paused" ? "▶ 继续" : "▶ 开始";
+  toggle.setAttribute("aria-label", player.terminal ? "推演已结束" : player.running ? "暂停推演" : player.status === "paused" ? "继续推演" : "开始推演");
   toggle.setAttribute("aria-pressed", String(player.running));
   toggle.classList.toggle("is-running", player.running);
   $("#btn-stop").disabled = !player.runId || locked || !["running", "paused"].includes(player.status);
-  $("#btn-single-step").disabled = !player.runId || locked || !["ready", "paused"].includes(player.status);
-  $("#btn-single-step").textContent = `单步推进 (+${player.dtUs / 1000}ms)`;
+  const step = $("#btn-single-step");
+  step.disabled = !player.runId || locked || !["ready", "paused"].includes(player.status);
+  step.title = `单步推进（+${player.dtUs / 1000}ms）`;
   $("#create-run").disabled = !state.selectedScenario || locked;
-  $("#playback-rate-value").textContent = `${player.rate}×`;
-  $("#playback-rate").setAttribute("aria-valuetext", `${player.rate} 倍速`);
-  $("#playback-speed-hint").textContent = "可在推演中随时调整倍速";
-  $("#playback-state-hint").textContent = !player.runId ? "加载场景后开始推演" : player.terminal ? "本次推演已结束，可重新加载场景" :
-    player.error ? "自动推进已中断，可继续重试" : player.running ? "按所选速度自动推进" :
-    player.status === "paused" ? "已暂停，可继续或单步查看" : "点击开始，按所选速度自动推进";
+  document.querySelectorAll(".pb-speed").forEach((button) => {
+    button.setAttribute("aria-pressed", String(Number(button.dataset.rate) === player.rate));
+  });
+  const status = $("#playback-status");
+  if (status) {
+    const state_ = !player.runId ? "idle" : player.error ? "error" : player.terminal ? "done" : player.running ? "running" : player.status === "paused" ? "paused" : "ready";
+    const labels = { idle: "未开始", error: "已中断", done: "已结束", running: "推演中", paused: "已暂停", ready: "待开始" };
+    status.dataset.state = state_;
+    status.textContent = labels[state_];
+  }
 }
 
 /* 换场景前停止调度，等待在途步骤和暂停确认。 */
@@ -2267,6 +2272,7 @@ function inspectDevice(deviceId, fillTarget = false) {
 function showTopoView() {
   $("#topo-container").style.display = "flex";
   $("#sub-view-container").style.display = "none";
+  setPlaybackOverlayVisible(true);
   // 确保 DOM 连线和坐标立即与 NODE_COORDINATES 保持绝对一致
   syncTopologyPositions();
 }
@@ -2290,6 +2296,13 @@ function syncTopologyPositions() {
 function showSubView() {
   $("#topo-container").style.display = "none";
   $("#sub-view-container").style.display = "block";
+  setPlaybackOverlayVisible(false);
+}
+
+/* 推演控制浮层只属于拓扑画布，切到其它 TAB 视图时收起，避免遮挡内容。 */
+function setPlaybackOverlayVisible(visible) {
+  const overlay = $("#playback-overlay");
+  if (overlay) overlay.style.display = visible ? "" : "none";
 }
 
 function fmtPct(value, digits = 1) {
@@ -2572,9 +2585,71 @@ function bindEvents() {
   $("#btn-refresh").addEventListener("click", refreshViews);
 
   $("#btn-run-toggle").addEventListener("click", togglePlayback);
-  $("#playback-rate").addEventListener("input", event => {
-    simulationPlayer.setRate(PLAYBACK_RATES[Number(event.target.value)]);
-  });
+
+  // 推演控制浮层：倍速切换、收起展开、按住标题栏拖动
+  const playbackOverlay = $("#playback-overlay");
+  if (playbackOverlay) {
+    playbackOverlay.querySelectorAll(".pb-speed").forEach((button) => {
+      button.addEventListener("click", () => {
+        const rate = Number(button.dataset.rate);
+        if (PLAYBACK_RATES.includes(rate)) simulationPlayer.setRate(rate);
+      });
+    });
+
+    const playbackOverlayToggle = $("#playback-overlay-toggle");
+    if (playbackOverlayToggle) {
+      playbackOverlayToggle.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const collapse = playbackOverlay.getAttribute("data-collapsed") !== "1";
+        playbackOverlay.setAttribute("data-collapsed", collapse ? "1" : "0");
+        playbackOverlayToggle.setAttribute("aria-expanded", String(!collapse));
+        playbackOverlayToggle.textContent = collapse ? "⌃" : "⌄";
+        playbackOverlayToggle.title = collapse ? "展开推演控制" : "收起推演控制";
+      });
+    }
+
+    const handle = $("#playback-handle");
+    if (handle) {
+      let drag = null;
+      handle.addEventListener("pointerdown", (event) => {
+        if (event.target.closest && event.target.closest("#playback-overlay-toggle")) return;
+        if (event.button !== undefined && event.button !== 0) return;
+        const panel = playbackOverlay.parentElement;
+        const panelRect = panel.getBoundingClientRect();
+        const overlayRect = playbackOverlay.getBoundingClientRect();
+        playbackOverlay.style.transform = "none";
+        playbackOverlay.style.left = `${overlayRect.left - panelRect.left}px`;
+        playbackOverlay.style.top = `${overlayRect.top - panelRect.top}px`;
+        drag = {
+          pointerId: event.pointerId,
+          offsetX: event.clientX - overlayRect.left,
+          offsetY: event.clientY - overlayRect.top,
+          panelLeft: panelRect.left,
+          panelTop: panelRect.top,
+          maxX: Math.max(0, panelRect.width - overlayRect.width),
+          maxY: Math.max(0, panelRect.height - overlayRect.height),
+        };
+        handle.classList.add("dragging");
+        if (handle.setPointerCapture) handle.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      });
+      handle.addEventListener("pointermove", (event) => {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        const x = Math.min(Math.max(0, event.clientX - drag.panelLeft - drag.offsetX), drag.maxX);
+        const y = Math.min(Math.max(0, event.clientY - drag.panelTop - drag.offsetY), drag.maxY);
+        playbackOverlay.style.left = `${x}px`;
+        playbackOverlay.style.top = `${y}px`;
+      });
+      const endDrag = (event) => {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        if (handle.hasPointerCapture && handle.hasPointerCapture(drag.pointerId)) handle.releasePointerCapture(drag.pointerId);
+        drag = null;
+        handle.classList.remove("dragging");
+      };
+      handle.addEventListener("pointerup", endDrag);
+      handle.addEventListener("pointercancel", endDrag);
+    }
+  }
   renderPlaybackControls();
 
   const packetLayer = $("#topo-packets");

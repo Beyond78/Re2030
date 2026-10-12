@@ -45,7 +45,7 @@ test('start automatically schedules steps; no independent automatic switch', asy
 
 test('speed changes replace a pending timer instead of creating parallel loops', async()=>{
   const f=fixture(); await f.player.command('start');
-  for(const rate of [.125,.25,.5,1]) {
+  for(const rate of [.125,.25,.5,1,2,5]) {
     f.player.setRate(rate);
     assert.equal(f.jobs.size,1);
     assert.equal([...f.jobs.values()][0].delay,1000/rate);
@@ -156,9 +156,9 @@ test('run replacement cannot proceed while a step is in flight', async()=>{
   assert.ok(f.calls.every(c=>c.runId==='run-1'));
 });
 
-test('only the four slow-motion multipliers are accepted and the default is 0.125x', ()=>{
+test('only the supported multipliers are accepted and the default is 0.125x', ()=>{
   const f=fixture();
   assert.equal(f.player.rate,.125);
-  for(const rate of [.125,.25,.5,1]) f.player.setRate(rate);
-  for(const rate of [0,.1,2,5,10]) assert.throws(()=>f.player.setRate(rate));
+  for(const rate of [.125,.25,.5,1,2,5]) f.player.setRate(rate);
+  for(const rate of [0,.1,.3,1.5,3,10]) assert.throws(()=>f.player.setRate(rate));
 });
