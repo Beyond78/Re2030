@@ -1303,6 +1303,7 @@ body {
 .msg-particle-group.data { color: #22c55e; }
 .msg-particle-group.command { color: #f59e0b; }
 .msg-particle-group.attack { color: #ef4444; }
+.msg-particle-group.rejected { color: #f97316; }
 .msg-particle-group[data-message-id] {
   cursor: pointer;
   pointer-events: visiblePainted;
@@ -1328,6 +1329,10 @@ body {
   filter: drop-shadow(0 0 5px currentColor);
   pointer-events: none;
   transition: stroke 120ms ease, stroke-width 120ms ease;
+}
+.msg-particle-group.rejected .msg-particle-halo {
+  opacity: 0.9;
+  stroke-dasharray: 3 2.5;
 }
 .msg-particle-label {
   fill: #f8fafc;
@@ -1369,6 +1374,7 @@ body {
 .particle-dot.command { background: #f59e0b; color: #f59e0b; }
 .particle-dot.other { background: #64748b; color: #64748b; }
 .particle-dot.attack { background: #ef4444; color: #ef4444; }
+.particle-dot.rejected { background: #f97316; color: #f97316; }
 
 .particle-filter-box {
   display: flex;

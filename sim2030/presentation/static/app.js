@@ -190,6 +190,7 @@ async function copyPacketJson() {
 function particleCategory(businessType) {
   if (businessType === "sampling" || businessType === "status" || businessType === "sync") return "data";
   if (businessType === "command" || businessType === "protection" || businessType === "feedback") return "command";
+  if (businessType === "goose_rejected") return "rejected";
   return "other";
 }
 
@@ -772,7 +773,7 @@ function renderGooseLab(data) {
         <p>${faultText}；故障电流设为 900 A，分闸后归零。功率曲线表示负荷供电功率。</p>
         <p>动作和线路状态按 100 ms 仿真步更新；400 ms 是本实验的故障清除观察时限。</p>
         <p>入口过滤在排队前匹配订阅和来源 MAC，未实现密码认证。容量为实验参数，不代表真实交换机性能。</p>
-        <p>正常样本帧按原时刻循环回放（每轮约 4.1 s）；攻击帧每次点击下发一帧。trip=false 不触发合闸。采样攻击帧不会自动投入。</p>
+        <p>正常样本帧按原时刻回放；攻击帧每次点击下发一帧。trip=false 不触发合闸。采集结束后可继续下发，订阅可能超时。</p>
         <p>IDS 参考提示来自报文检查，设备响应来自仿真，两者分别展示。</p>
       </details>`;
   }
@@ -2050,7 +2051,8 @@ function updatePacketFlow(data, pausedStep = false) {
     clearParticleNodes();
   }
 
-  const inFlights = [...(data.in_flight_messages || [])].sort((a, b) => Number(b.business_type === "goose_attack") - Number(a.business_type === "goose_attack"));
+  const priority = (type) => (type === "goose_attack" ? 2 : type === "goose_rejected" ? 1 : 0);
+  const inFlights = [...(data.in_flight_messages || [])].sort((a, b) => priority(b.business_type) - priority(a.business_type));
   const incomingIds = new Set();
 
   inFlights.slice(0, 24).forEach((msg, idx) => {
@@ -2060,15 +2062,20 @@ function updatePacketFlow(data, pausedStep = false) {
 
     if (messageId) packetMessageMap.set(messageId, msg);
 
-    // 如果该报文已在航线中，仅更新状态，绝对不重置 birthTime，确保运动连续
+    const attack = msg.business_type === 'goose_attack';
+    const category = attack ? "attack" : particleCategory(msg.business_type || "unknown");
+
+    // 如果该报文已在航线中，仅更新状态与类别，绝对不重置 birthTime，确保运动连续
     if (particleMap.has(id)) {
       const existing = particleMap.get(id);
       existing.isDead = false;
+      // 手动帧的判定结果可能从“在途”变为“被拒”，颜色随之由红色攻击色转为被拒橙色
+      existing.category = category;
       return;
     }
 
     // 新加入的在途报文
-    const attack = msg.business_type === 'goose_attack';
+    const rejected = msg.business_type === 'goose_rejected';
     const switchAsset = attack ? state.networkModel?.assets.find(item => item.id === msg.sender_id) : null;
     const src = switchAsset || NODE_COORDINATES[msg.sender_id];
     const dst = NODE_COORDINATES[msg.receiver_id];
@@ -2077,6 +2084,7 @@ function updatePacketFlow(data, pausedStep = false) {
     const points = port ? [port.port, {x: port.anchor.x, y: port.port.y}, port.anchor] : NetworkTopology.messageRoute(state.networkModel, msg);
     if (!points) return;
 
+    const staggered = (attack && msg.payload?.batch_count > 1) || rejected;
     particleMap.set(id, {
       id: id,
       messageId: messageId,
@@ -2086,8 +2094,8 @@ function updatePacketFlow(data, pausedStep = false) {
       x2: dst.x + 45,
       y2: dst.y + 24,
       businessType: msg.business_type || "unknown",
-      category: attack ? "attack" : particleCategory(msg.business_type || "unknown"),
-      birthTime: animClock - (pausedStep ? 550 : attack && msg.payload?.batch_count > 1 ? (idx % 24) * 35 : 0),
+      category,
+      birthTime: animClock - (pausedStep ? 550 : staggered ? (idx % 24) * 35 : 0),
       duration: 1100, // 约1.1秒平滑穿越
       isDead: false,
     });

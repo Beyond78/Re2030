@@ -8,7 +8,7 @@ import zipfile
 
 from sim2030.goose_codec import parse_goose_frame
 from sim2030.goose_capture import GooseCapture, read_pcap, reference_checks, normal_baseline
-from sim2030.goose_lab import GooseLab
+from sim2030.goose_lab import GooseLab, VISIBLE_RETENTION_US
 from sim2030.base.observations import FileObservationSource, validate_observation_event
 from sim2030.application import Application
 from sim2030.presentation.server import PresentationServer
@@ -26,10 +26,17 @@ def tlv(tag, value):
 
 def make_frame(st=1, sq=1, source="000c29100001", trip=False, appid=12289):
     clock = struct.pack(">I", ORIGIN) + b"\x00" * 4
-    dataset = tlv(0xA2, tlv(0x83, bytes([trip])) + tlv(0x84, b"\x03\x00\x00") + tlv(0x91, clock))
+    # 与真实样本一致：数据集 4 个条目，首条为 [跳闸位, 品质位, 时标]。
+    quality = tlv(0x84, b"\x0d\x00\x00")
+
+    def entry(first):
+        return tlv(0xA2, first + quality + tlv(0x91, clock))
+
+    dataset = (entry(tlv(0x83, bytes([trip]))) + entry(tlv(0x84, b"\x08\x00"))
+               + entry(tlv(0x83, b"\x01")) + entry(tlv(0x83, b"\x00")))
     parts = [(0x80, b"PROT/LLN0$GO$gcbTrip"), (0x81, b"\x01\xf4"), (0x82, b"PROT/LLN0$dsTrip"),
              (0x83, b"test-goose"), (0x84, clock), (0x85, bytes([st])), (0x86, bytes([sq])),
-             (0x87, b"\0"), (0x88, b"\1"), (0x89, b"\0"), (0x8A, b"\1"), (0xAB, dataset)]
+             (0x87, b"\0"), (0x88, b"\1"), (0x89, b"\0"), (0x8A, b"\x04"), (0xAB, dataset)]
     pdu = tlv(0x61, b"".join(tlv(tag, value) for tag, value in parts))
     ethernet = bytes.fromhex("010ccd013001" + source) + struct.pack(">HHH", 0x8100, 0x8003, 0x88B8)
     return ethernet + struct.pack(">HHHH", appid, len(pdu) + 8, 0, 0) + pdu
@@ -167,42 +174,54 @@ class TestGooseCapture(unittest.TestCase):
         finally:
             app.close()
 
-    def lab(self, sample="forgery"):
-        settings = {"sample": sample, "policy": "basic", "capacity": "normal", "service_fps": 5000,
+    def lab(self, sample="forgery", policy="validated"):
+        settings = {"sample": sample, "policy": policy, "capacity": "normal", "service_fps": 5000,
                     "queue_capacity": 64, "fault_start_us": None, "fault_current_a": 900,
                     "trip_deadline_us": 400000, "manual_dispatch": True}
         return GooseLab(GooseCapture(self.data / sample), settings)
 
-    def test_baseline_replay_loops_after_sample_end(self):
-        capture = GooseCapture(self.data / "forgery")
+    def test_accepted_baseline_frames_stay_off_the_topology(self):
         lab = self.lab()
-        self.assertEqual(lab.baseline_count, 4)
-        # 虚拟帧编号越过样本长度后按取模映射回样本内帧，攻击帧每个轮次都保持未自动投入。
-        self.assertEqual(lab.frame_record(5), capture.records[0])
-        self.assertEqual(lab.frame_record(9), capture.records[0])
-        self.assertEqual(lab.frame_record(8), capture.records[3])
-        now = 0
-        for _ in range(40):
-            now += 100000
-            lab.advance(now, None)
-        self.assertGreater(lab.cursor, 4)
-        self.assertGreater(lab.counts["received"], 4)
-        self.assertEqual(lab.decisions[2]["status"], "not_sent")
-        self.assertEqual(lab.decisions[6]["status"], "not_sent")
+        lab.advance(400000, None)
+        self.assertEqual(lab.decisions[1]["status"], "accepted")
+        self.assertEqual(lab.in_flight(), [])
 
-    def test_manual_frame_ids_do_not_collide_with_looped_baseline(self):
+    def test_manual_non_accepted_frame_is_published_then_expires(self):
         lab = self.lab()
-        receipt = lab.dispatch("batch-1", 0, 100000)
-        self.assertEqual(receipt["status"], "accepted")
-        self.assertEqual(lab.manual_sent, 1)
-        manual_numbers = list(lab.manual_frames)
-        self.assertEqual(len(manual_numbers), 1)
-        self.assertLess(manual_numbers[0], 0)
-        self.assertNotIn(manual_numbers[0], range(1, lab.baseline_count + 1))
+        lab.advance(0, None)
+        self.assertEqual(lab.dispatch("atk-1", 0, 100000)["status"], "accepted")
+        lab.advance(100000, None)
+        published = [message for message in lab.in_flight() if message["business_type"] == "goose_rejected"]
+        self.assertEqual([message["message_id"] for message in published], ["atk-1:1"])
+        self.assertEqual(published[0]["sender_id"], "sw-process")
+        self.assertNotEqual(published[0]["payload"]["receiver_status"], "accepted")
+        lab.advance(100000 + VISIBLE_RETENTION_US + 1, None)
+        self.assertEqual([message for message in lab.in_flight()
+                          if message["business_type"] == "goose_rejected"], [])
+
+    def test_manual_frame_is_numbered_after_the_baseline(self):
+        lab = self.lab()
+        self.assertEqual(lab.dispatch("atk-1", 0, 100000)["status"], "accepted")
+        self.assertEqual(list(lab.manual_frames), [len(lab.capture.records) + 1])
         lab.advance(200000, None)
-        row = lab.receiver_row(manual_numbers[0])
+        row = lab.receiver_row(len(lab.capture.records) + 1)
         self.assertEqual(row["label"], "下发 #1")
         self.assertEqual(row["source"], "交换机")
+
+    def test_rejected_baseline_frames_are_published(self):
+        # 抑制帧投毒把接收端状态号推到 50 之后，随后回退的低 stNum 基线帧都会被拒。
+        lab = self.lab()
+        lab.last_st, lab.last_sq, lab.last_trip = 50, 0, False
+        lab.advance(500000, None)
+        rejected = [message for message in lab.in_flight() if message["business_type"] == "goose_rejected"]
+        self.assertEqual([message["message_id"] for message in rejected],
+                         ["goose-baseline-1", "goose-baseline-3", "goose-baseline-4"])
+        self.assertEqual(rejected[0]["payload"]["receiver_status"], "rejected")
+        self.assertEqual(rejected[0]["sender_id"], "prot")
+        self.assertEqual(rejected[0]["payload"]["stNum"], 1)
+        lab.advance(2000000, None)
+        self.assertEqual([message for message in lab.in_flight()
+                          if message["business_type"] == "goose_rejected"], [])
 
     def test_failed_sample_load_preserves_existing_run(self):
         app = Application(output_root=str(self.root / "runs"))
