@@ -74,6 +74,8 @@ class ProtectionDevice(Device):
         self._drain_inbox()
         messages = self._drain_outbox()
         if self.parameters.get("external_trip_replay", False):
+            # 接收实验用该开关停用本地判据，避免另一路内部跳闸掩盖回放结果。
+            # 其他场景不设置此参数（默认 False），保护判据照常评估。
             return messages
         if time_us < self._next_eval_us:
             return messages
@@ -86,6 +88,9 @@ class ProtectionDevice(Device):
                 "request_id": action.get("request_id", f"prot-{time_us}"),
                 "action_type": action["action_type"],
                 "parameters": action.get("parameters", {}),
+                # 标记来源：接收实验据此把保护判据跳闸与 GOOSE 回放跳闸分开处理。
+                "protection_trip": True,
+                "sample_value": self._read_value(self._latest_sample),
             }
             messages.extend(
                 self._new_message(self.out_port, BusinessType.COMMAND, payload, time_us, related_request=payload["request_id"])

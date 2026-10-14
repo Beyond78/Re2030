@@ -26,7 +26,7 @@ from sim2030.base.bay import (
 )
 from sim2030.base.station import StationControlSystem, TimeService
 from sim2030.base.external import RemoteSubstation, TimeSatellite
-from sim2030.base.security import ElectromagneticAttackNode, SpectrumDetectorNode
+from sim2030.base.security import ElectromagneticAttackNode, NetworkAttackNode, SpectrumDetectorNode
 from sim2030.base.communication import WirelessTerminal, WirelessGateway
 
 
@@ -62,6 +62,7 @@ DEVICE_TYPES: Dict[str, DeviceFactory] = {
     "time_satellite": TimeSatellite,
     "remote_substation": RemoteSubstation,
     "em_attack_source": ElectromagneticAttackNode,
+    "network_attack_source": NetworkAttackNode,
     "spectrum_detector": SpectrumDetectorNode,
     "wireless_terminal": WirelessTerminal,
     "wireless_gateway": WirelessGateway,

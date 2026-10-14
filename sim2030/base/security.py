@@ -1,9 +1,11 @@
-"""安全相关节点：电磁攻击节点与频谱检测节点。
+"""安全相关节点：电磁攻击节点、网络攻击节点与频谱检测节点。
 
-两者部署在一次设备附近，用于表达“攻击源”和“检测点”的位置关系：
+三者部署在被攻击对象附近，用于表达“攻击源”和“检测点”的位置关系：
 
 - :class:`ElectromagneticAttackNode` 表示电流互感器附近的电磁干扰源。读数偏差本身由
   场景攻击计划与底座效果模型（``reading_offset``）施加，节点只表达自身状态。
+- :class:`NetworkAttackNode` 表示接入过程网交换机的攻击源，攻击报文由它注入过程网。
+  报文实例与接收判定仍由 GOOSE 接收实验负责，节点只表达注入来源与归属。
 - :class:`SpectrumDetectorNode` 是频谱检测节点的占位实现，暂不产生识别结论。
 """
 from __future__ import annotations
@@ -78,6 +80,42 @@ class ElectromagneticAttackNode(Device):
         data["state"]["target_asset_id"] = self.target_asset_id
         data["state"]["frequency_mhz"] = self.frequency_mhz
         data["state"]["power_dbm"] = self.power_dbm
+        return data
+
+
+class NetworkAttackNode(Device):
+    """网络攻击节点：接入过程网交换机的攻击源。
+
+    攻击报文由它注入过程网：接收实验按 ``attack_origin.asset_id`` 取本节点，报文
+    ``sender_id`` 也记为本节点，使“谁在发攻击报文”在拓扑与接收记录里保持一致。
+
+    参数：``access_switch_id``（接入的交换机资产，默认 ``sw-process``）、``attack_type``
+    （攻击类型名，默认 ``network``）。节点本身不推进报文，也没有可切换的发射状态。
+    """
+
+    def __init__(self, spec: DeviceSpec):
+        super().__init__(spec)
+        self.access_switch_id: str = self.parameters.get("access_switch_id", "sw-process")
+        self.attack_type: str = self.parameters.get("attack_type", "network")
+
+    def describe_controls(self) -> List[Dict[str, Any]]:
+        """下发项：逐帧注入、状态号投毒、批量洪泛三类攻击报文。
+
+        样本是否已导入、以及洪泛对保护判据的影响，属于运行期实验状态，由演示平面
+        在渲染时补充说明；节点自身只声明动作、批量参数与默认值。
+        """
+        return [
+            {"kind": "command", "action": "send_attack_frame", "label": "下发伪造跳闸帧", "params": []},
+            {"kind": "command", "action": "send_suppression_frame", "label": "下发消息抑制帧（状态号投毒）", "params": []},
+            {"kind": "command", "action": "send_attack_burst", "label": "批量下发（DDoS 演示）",
+             "params": [{"key": "count", "label": "批量数量（帧）", "value": 1000,
+                         "input": {"min": 1, "max": 5000, "step": 1}}]},
+        ]
+
+    def snapshot(self) -> Dict[str, Any]:
+        data = super().snapshot()
+        data["state"]["access_switch_id"] = self.access_switch_id
+        data["state"]["attack_type"] = self.attack_type
         return data
 
 

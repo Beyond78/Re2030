@@ -97,6 +97,23 @@ const NetworkTopology = (() => {
         title: `${endpointId(link.endpoint_a)} ↔ ${endpointId(link.endpoint_b)} · ${direct?.label || kind}` });
     }
 
+    // 网络攻击节点是设备而不是部署资产：用红色虚线标出它接入的交换机端口。
+    const originId = topology.layout?.goose_lab?.attack_origin?.asset_id;
+    const origin = originId ? coordinates[originId] : null;
+    if (origin && !assets.some(asset => asset.id === originId)) {
+      const target = networks.find(network =>
+        (network.connections || []).some(connection => connection.device_id === originId))
+        || networks.find(network => network.switch?.id === topology.layout?.goose_lab?.attack_origin?.switch_id);
+      if (target) {
+        const sw = target.switch;
+        // 攻击节点排在交换机正下方：接线从节点顶边垂直上联到交换机底边。
+        const x = origin.x + 45;
+        const points = [{ x, y: origin.y }, { x, y: sw.y + sw.height }];
+        cables.push({ id: `${target.id}:attack`, kind: "attack-access", points,
+          title: `${originId} ↔ ${sw.name}（场景假定攻击者已接入过程网，注入攻击报文）` });
+      }
+    }
+
     return { networks, routes, cables, assets, interfaces, deployment,
       width: Math.max(0, ...assets.map(a => a.x + a.width + 55)),
       height: Math.max(0, ...assets.map(a => a.y + a.height + 25)) };

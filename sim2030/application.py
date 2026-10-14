@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from sim2030.attack.planner import AttackPlanner
 from sim2030.base.engine import SimulationEngine
 from sim2030.base.observations import FileObservationSource, ObservationGateway, EvidenceReader
-from sim2030.base.security import ElectromagneticAttackNode
+from sim2030.base.security import ElectromagneticAttackNode, NetworkAttackNode
 from sim2030.contracts import StepResult
 from sim2030.defense.engine import DEFAULT_STRATEGIES, DefenseEngine
 from sim2030.evaluation import Evaluator
@@ -35,6 +35,9 @@ CONTROL_ACTIONS = {"start_run", "pause_run", "stop_run"}
 
 # 演示平面手动攻击动作：直接作用于底座，不经站端业务命令链路。
 MANUAL_DEVICE_ACTIONS = {"start_attack", "stop_attack"}
+
+# 攻击报文下发动作：目标为场景声明的攻击节点（layout.goose_lab.attack_origin.asset_id）。
+ATTACK_DISPATCH_ACTIONS = {"send_attack_frame", "send_attack_burst", "send_suppression_frame"}
 
 
 class Application:
@@ -218,7 +221,8 @@ class Application:
         if target_id == "run" or operation_type in ("start", "pause", "stop") or action_type in CONTROL_ACTIONS:
             return self._submit_control(request, request_id)
 
-        if target_id == "sw-process" and action_type in {"send_attack_frame", "send_attack_burst", "send_suppression_frame"}:
+        attack_node = self._attack_node_locked()
+        if attack_node is not None and target_id == attack_node.asset_id and action_type in ATTACK_DISPATCH_ACTIONS:
             if self.goose_lab is None or self.status not in {STATUS_READY, STATUS_PAUSED, STATUS_RUNNING}:
                 return {"request_id": request_id, "status": "rejected", "reason": "请先加载可运行的 GOOSE 场景"}
             parameters = request.get("parameters", {})
@@ -261,6 +265,16 @@ class Application:
         operation.setdefault("time_us", self.current_time_us)
         self._pending_operations.append(operation)
         return {"request_id": request_id, "status": "queued"}
+
+    def _attack_node_locked(self):
+        """返回场景声明的攻击节点实例；未声明、未建成或不是攻击节点时返回 ``None``。"""
+        if self.config is None or self.engine is None:
+            return None
+        origin = (self.config.layout.get("goose_lab") or {}).get("attack_origin")
+        if not origin:
+            return None
+        device = self.engine.get_device(origin.get("asset_id", ""))
+        return device if isinstance(device, NetworkAttackNode) else None
 
     def _submit_control(self, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
         action = request.get("operation_type") or request.get("action_type", "")

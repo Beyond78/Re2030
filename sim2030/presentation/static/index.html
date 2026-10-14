@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>国家重点研发计划2030 · 感控系统安全态势大屏</title>
-  <link rel="stylesheet" href="/style.css?v=20261012-playback3">
+  <link rel="stylesheet" href="/style.css?v=20261013-attacknode">
 </head>
 <body>
   <!-- 顶部状态栏 -->
@@ -101,8 +101,10 @@
           <div id="receiver-history" class="receiver-frame-list"></div>
           <div class="capture-pagination"><button type="button" id="receiver-older" class="btn btn-secondary">较早记录</button><button type="button" id="receiver-latest" class="btn btn-secondary">最新记录</button></div>
         </section>
-        <!-- 交换机：点选交换机后在此展开端口清单与攻击报文下发 -->
-        <section id="switch-control-panel" class="switch-control-panel device-control-card" aria-label="交换机端口与控制" hidden></section>
+        <!-- 交换机：点选交换机后在此展开端口清单 -->
+        <section id="switch-control-panel" class="switch-control-panel device-control-card" aria-label="交换机端口" hidden></section>
+        <!-- 网络攻击节点：点选红色攻击节点后在此展开攻击报文下发 -->
+        <section id="attack-node-panel" class="attack-node-panel device-control-card" aria-label="网络攻击节点控制" hidden></section>
       </div>
 
       <div class="section-title">时刻历史快照回放</div>
@@ -321,8 +323,8 @@
   </div>
   <div id="packet-inspector-toast" class="packet-inspector-toast" role="status" aria-live="polite"></div>
 
-  <script src="/network-topology.js?v=20261011"></script>
+  <script src="/network-topology.js?v=20261013-attacknode"></script>
   <script src="/simulation-player.js?v=20261012-playback3"></script>
-  <script src="/app.js?v=20261012-playback3"></script>
+  <script src="/app.js?v=20261013-attacknode"></script>
 </body>
 </html>

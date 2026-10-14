@@ -11,8 +11,11 @@ from sim2030.goose_capture import GooseCapture, read_pcap, reference_checks, nor
 from sim2030.goose_lab import GooseLab, VISIBLE_RETENTION_US
 from sim2030.base.observations import FileObservationSource, validate_observation_event
 from sim2030.application import Application
+from sim2030.constants import BusinessType
+from sim2030.contracts import Message
 from sim2030.presentation.server import PresentationServer
 from sim2030.presentation.views import build_goose_view
+from sim2030.scenario import create_device, load_scenario, validate_scenario
 from tools.import_message_core import import_package
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -174,11 +177,101 @@ class TestGooseCapture(unittest.TestCase):
         finally:
             app.close()
 
-    def lab(self, sample="forgery", policy="validated"):
+    def lab(self, sample="forgery", policy="validated", origin=None):
         settings = {"sample": sample, "policy": policy, "capacity": "normal", "service_fps": 5000,
                     "queue_capacity": 64, "fault_start_us": None, "fault_current_a": 900,
                     "trip_deadline_us": 400000, "manual_dispatch": True}
+        if origin is not None:
+            settings["attack_origin"] = origin
         return GooseLab(GooseCapture(self.data / sample), settings)
+
+    def test_protection_criteria_are_an_experiment_input(self):
+        # 样本决定默认工况：投入故障的样本默认启用保护判据，未投入故障的样本默认停用。
+        from sim2030.goose_lab import configure_lab
+        from sim2030.scenario import load_scenario
+        defaults = {}
+        for sample in ("normal", "dos", "forgery"):
+            config = load_scenario(str(ROOT / "scenarios/substation-goose-lab.json"))
+            configure_lab(config, {"sample": sample})
+            prot = next(d for d in config.devices if d.device_id == "prot")
+            defaults[sample] = (config.layout["goose_lab"]["protection_enabled"],
+                                prot.parameters["external_trip_replay"])
+        self.assertEqual(defaults["normal"], (True, False))
+        self.assertEqual(defaults["dos"], (True, False))
+        self.assertEqual(defaults["forgery"], (False, True))
+
+        config = load_scenario(str(ROOT / "scenarios/substation-goose-lab.json"))
+        configure_lab(config, {"sample": "forgery", "protection": True})
+        prot = next(d for d in config.devices if d.device_id == "prot")
+        self.assertFalse(prot.parameters["external_trip_replay"])
+        with self.assertRaises(ValueError):
+            configure_lab(config, {"protection": "yes"})
+
+    def test_attack_node_owns_the_injection_actions(self):
+        # 攻击能力挂在场景声明的红色攻击节点上：交换机不再是攻击下发目标，也没有攻击控制项。
+        scene = ROOT / "scenarios/substation-goose-lab.json"
+        config = load_scenario(str(scene))
+        self.assertEqual(validate_scenario(config), [])
+        origin = config.layout["goose_lab"]["attack_origin"]
+        node = next(d for d in config.devices if d.device_id == origin["asset_id"])
+        self.assertEqual((node.device_type, node.name), ("network_attack_source", "网络攻击节点"))
+        self.assertEqual(node.parameters["access_switch_id"], origin["switch_id"])
+        self.assertEqual(create_device(node).describe_controls()[2]["params"][0]["input"]["max"], 5000)
+        # 交换机是部署资产而不是设备：攻击节点必须另有实体设备承载下发命令。
+        self.assertNotEqual(origin["asset_id"], origin["switch_id"])
+        self.assertNotIn("sw-process", [d.device_id for d in config.devices])
+
+        app = Application(output_root=str(self.root / "runs"))
+        try:
+            app.load(str(scene))
+            app.start()
+            app.step()
+            self.assertEqual(app.get_device_controls("sw-process")["status"], "not_found")
+            rejected = app.submit_operation({"request_id": "old-1", "target_asset_id": "sw-process",
+                                             "action_type": "send_attack_frame"})
+            self.assertEqual(rejected["status"], "rejected")
+            receipt = app.submit_operation({"request_id": "atk-1", "target_asset_id": origin["asset_id"],
+                                            "action_type": "send_attack_burst", "parameters": {"count": 3}})
+            self.assertEqual((receipt["status"], receipt["count"]), ("accepted", 3))
+            app.step()
+            senders = {message["sender_id"] for message in app.get_view("system")["in_flight_messages"]}
+            self.assertIn(origin["asset_id"], senders)
+            self.assertNotIn("sw-process", senders)
+        finally:
+            app.close()
+
+    def test_protection_trip_uses_a_channel_of_its_own(self):
+        # 保护判据跳闸不应进入智能终端共享接收队列：洪泛塞满队列时它仍要能下发。
+        lab = self.lab()
+        lab.queue.extend((index, index) for index in range(lab.settings["queue_capacity"]))
+
+        class Terminal:
+            up_port = "up"
+
+            def __init__(self):
+                self.received = []
+
+            def receive(self, message):
+                self.received.append(message)
+
+        class Engine:
+            def __init__(self, terminal):
+                self._terminal = terminal
+
+            def get_device(self, device_id):
+                return self._terminal
+
+        terminal = Terminal()
+        trip = Message(message_id="prot-1", sender_id="prot", receiver_id="ctl_brk",
+                       business_type=BusinessType.COMMAND, source_port="out", target_port="up",
+                       created_time_us=1000000,
+                       payload={"request_id": "prot-1", "action_type": "trip", "parameters": {},
+                                "protection_trip": True, "sample_value": 900.0})
+        self.assertTrue(lab.receive_control(trip, 1000000, Engine(terminal)))
+        self.assertEqual([message.message_id for message in terminal.received], ["prot-1"])
+        self.assertEqual(lab.protection_trips, [{"time_us": 1000000, "request_id": "prot-1", "sample": 900.0}])
+        self.assertEqual(lab.trip_source, "protection")
+        self.assertEqual(lab.counts.get("dropped"), None)
 
     def test_accepted_baseline_frames_stay_off_the_topology(self):
         lab = self.lab()
@@ -193,11 +286,26 @@ class TestGooseCapture(unittest.TestCase):
         lab.advance(100000, None)
         published = [message for message in lab.in_flight() if message["business_type"] == "goose_rejected"]
         self.assertEqual([message["message_id"] for message in published], ["atk-1:1"])
+        # 未声明 attack_origin 时沿用过程网交换机，保持旧记录与旧场景的可比性。
         self.assertEqual(published[0]["sender_id"], "sw-process")
         self.assertNotEqual(published[0]["payload"]["receiver_status"], "accepted")
         lab.advance(100000 + VISIBLE_RETENTION_US + 1, None)
         self.assertEqual([message for message in lab.in_flight()
                           if message["business_type"] == "goose_rejected"], [])
+
+    def test_attack_origin_decides_the_frame_source(self):
+        # 攻击报文来源由场景 attack_origin 声明：报文 sender_id 与接收记录来源都跟随它。
+        lab = self.lab(origin={"asset_id": "net_attack_node", "name": "网络攻击节点"})
+        self.assertEqual((lab.attack_origin_id, lab.attack_origin_name), ("net_attack_node", "网络攻击节点"))
+        lab.advance(0, None)
+        self.assertEqual(lab.dispatch("atk-1", 0, 100000)["status"], "accepted")
+        lab.advance(100000, None)
+        published = [message for message in lab.in_flight() if message["business_type"] == "goose_rejected"]
+        self.assertEqual(published[0]["sender_id"], "net_attack_node")
+        lab.advance(200000, None)
+        row = lab.receiver_row(len(lab.capture.records) + 1)
+        self.assertEqual(row["source"], "网络攻击节点")
+        self.assertIn("网络攻击节点", [event["text"] for event in lab.events if event["kind"] == "manual_dispatch"][0])
 
     def test_manual_frame_is_numbered_after_the_baseline(self):
         lab = self.lab()
