@@ -7,7 +7,6 @@ __pycache__/
 # 运行产物
 runs/
 # 用户交付的原始报文与本地导入产物
-data/message_core/
 env_dump.txt
 eval_dump.txt
 
