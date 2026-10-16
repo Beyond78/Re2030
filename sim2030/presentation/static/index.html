@@ -199,6 +199,16 @@
           <button type="button" id="topology-redo" class="legend-btn" aria-label="重做布局修改" title="重做" disabled>↷</button>
           <button type="button" id="topology-layout-reset" class="legend-btn" title="恢复当前场景初始位置">恢复初始</button>
           <button type="button" id="topology-layout-save" class="legend-btn" title="仅保存在此浏览器">本地保存</button>
+          <select id="topology-module-type" class="topology-module-type" aria-label="新增模块类型">
+            <option value="generic">自定义模块</option>
+            <option value="switch">过程网交换机</option>
+            <option value="ids">IDS</option>
+            <option value="sensor">传感器</option>
+            <option value="controller">控制接口</option>
+            <option value="attack">攻击节点</option>
+          </select>
+          <button type="button" id="topology-add-module" class="legend-btn" title="添加一个仅用于拓扑展示的模块">＋模块</button>
+          <button type="button" id="topology-link-toggle" class="legend-btn" aria-pressed="false" title="依次点击两个模块创建展示连线">连线</button>
           <span id="topology-edit-status" role="status" aria-live="polite"></span>
         </div>
         <span class="topo-gesture-hint">拖动平移 · Ctrl + 滚轮缩放</span>
@@ -247,6 +257,7 @@
           <g id="topo-cyber-demo" aria-label="网络攻击演示路径"></g>
           <g id="topo-goose-path" aria-label="模拟终端接收路径"></g>
           <g id="topo-nodes" class="topo-nodes-layer"></g>
+          <g id="topo-custom-nodes" class="topo-custom-nodes-layer"></g>
           <!-- 交换机、镜像口与安全监测设备 -->
           <g id="topo-network-assets"></g>
         </svg>
@@ -333,7 +344,7 @@
 
   <script src="/network-topology.js?v=20261013-attacknode"></script>
   <script src="/simulation-player.js?v=20261012-playback3"></script>
-  <script src="/topology-layout-editor.js?v=20261016-layout3"></script>
-  <script src="/app.js?v=20261016-layout3"></script>
+  <script src="/topology-layout-editor.js?v=20261016-layout4"></script>
+  <script src="/app.js?v=20261016-layout4"></script>
 </body>
 </html>

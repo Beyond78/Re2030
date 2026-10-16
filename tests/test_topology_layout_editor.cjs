@@ -109,3 +109,26 @@ test('persists editable layer background sizes independently from device sizes',
   });
   assert.deepEqual(restored.getSize('layer:process'), { width: 820, height: 420 });
 });
+
+test('persists custom modules and links through undo, redo, and storage', () => {
+  const storage = memoryStorage();
+  const editor = new TopologyLayoutEditor(storage);
+  editor.configure('alpha', { a: { x: 1, y: 2 } }, { a: { width: 90, height: 48 } });
+  const before = editor.snapshotLayout();
+  editor.customModules.push({ id: 'custom-a', kind: 'sensor', name: '传感器', x: 120, y: 80, width: 110, height: 58 });
+  editor.positions['custom-a'] = { x: 120, y: 80 };
+  editor.sizes['custom-a'] = { width: 110, height: 58 };
+  editor.customLinks.push({ id: 'custom-link-a', source: 'custom-a', target: 'a' });
+  assert.equal(editor.commitLayout(before), true);
+  assert.equal(editor.undo(), true);
+  assert.deepEqual(editor.customModules, []);
+  assert.deepEqual(editor.customLinks, []);
+  assert.equal(editor.redo(), true);
+  assert.equal(editor.customModules[0].id, 'custom-a');
+  assert.deepEqual(editor.customLinks, [{ id: 'custom-link-a', source: 'custom-a', target: 'a' }]);
+  assert.equal(editor.save(), true);
+  const restored = new TopologyLayoutEditor(storage);
+  restored.configure('alpha', { a: { x: 1, y: 2 } }, { a: { width: 90, height: 48 } });
+  assert.equal(restored.customModules[0].name, '传感器');
+  assert.deepEqual(restored.customLinks[0], { id: 'custom-link-a', source: 'custom-a', target: 'a' });
+});

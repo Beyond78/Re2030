@@ -36,6 +36,8 @@ const state = {
 const $ = (selector) => document.querySelector(selector);
 const cyberDemo = new CyberDemo();
 const topologyLayoutEditor = new TopologyLayoutEditor();
+let customLinkSourceId = null;
+let customLinkMode = false;
 let cyberDemoAnimationStart = 0;
 let cyberDemoPaths = [];
 
@@ -1620,13 +1622,23 @@ function updateTopologyEditorControls() {
   $("#topology-layout-reset").disabled = !state.systemData?.topology;
   $("#topology-layout-save").disabled = !state.systemData?.topology;
   const status = $("#topology-edit-status");
-  if (status) status.textContent = state.topologyEditing ? "编辑中 · 拖动节点" : "";
+  if (status) status.textContent = state.topologyEditing
+    ? (customLinkMode ? (customLinkSourceId ? "已选起点 · 点击终点" : "连线模式") : "编辑中 · 拖动节点") : "";
+  $("#topology-module-type")?.toggleAttribute("disabled", !state.topologyEditing);
+  $("#topology-add-module")?.toggleAttribute("disabled", !state.topologyEditing);
+  $("#topology-link-toggle")?.toggleAttribute("disabled", !state.topologyEditing);
+  const linkToggle = $("#topology-link-toggle");
+  if (linkToggle) {
+    linkToggle.textContent = customLinkMode ? "结束连线" : "连线";
+    linkToggle.setAttribute("aria-pressed", String(customLinkMode));
+  }
   $("#topo-viewport")?.classList.toggle("topology-editing", state.topologyEditing);
 }
 
 function setTopologyEditing(enabled) {
   if (enabled && (simulationPlayer.running || simulationPlayer.busy || state.loadingRun)) return;
   state.topologyEditing = Boolean(enabled);
+  if (!state.topologyEditing) setCustomLinkMode(false);
   updateTopologyEditorControls();
 }
 
@@ -1640,6 +1652,7 @@ function refreshEditedTopology() {
   renderTopologyLinks();
   renderNetworkRegions(state.networkModel, bands);
   renderNetworkAssets(state.systemData);
+  renderCustomTopology();
   applyCanvasSize(effective.layout || {}, bands);
   updateTopologyEditorControls();
 }
@@ -1703,6 +1716,130 @@ function applyTopologyEditorSnapshot() {
   Object.assign(NODE_SIZES, topologyLayoutEditor.sizes);
   Object.keys(LAYER_SIZES).forEach((key) => delete LAYER_SIZES[key]);
   Object.assign(LAYER_SIZES, topologyLayoutEditor.layerSizes);
+}
+
+function customModulePosition(module) {
+  return NODE_COORDINATES[module.id] || { x: Number(module.x) || 100, y: Number(module.y) || 100 };
+}
+
+function customModuleSize(module) {
+  return NODE_SIZES[module.id] || { width: Number(module.width) || 110, height: Number(module.height) || 58 };
+}
+
+function topologyEndpoint(id) {
+  const module = (topologyLayoutEditor.customModules || []).find(item => item.id === id);
+  const position = NODE_COORDINATES[id] || (module ? customModulePosition(module) : null);
+  if (!position) return null;
+  const size = NODE_SIZES[id] || (module ? customModuleSize(module) : { width: NODE_SIZE.w, height: NODE_SIZE.h });
+  return { x: position.x + size.width / 2, y: position.y + size.height / 2 };
+}
+
+function customTopologyIds() {
+  return new Set((topologyLayoutEditor.customModules || []).map(module => module.id));
+}
+
+function renderCustomTopology() {
+  const nodeGroup = $("#topo-custom-nodes");
+  const linkGroup = $("#topo-links");
+  if (!nodeGroup || !linkGroup) return;
+  const modules = topologyLayoutEditor.customModules || [];
+  linkGroup.querySelectorAll(".topo-custom-link").forEach(node => node.remove());
+  (topologyLayoutEditor.customLinks || []).forEach(link => {
+    const source = topologyEndpoint(link.source);
+    const target = topologyEndpoint(link.target);
+    if (!source || !target) return;
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("class", "topo-link topo-custom-link custom-link");
+    path.setAttribute("d", NetworkTopology.pathData([source, target]));
+    path.dataset.customLinkId = link.id;
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent = `${link.source} ↔ ${link.target} · 仅拓扑展示`;
+    path.appendChild(title);
+    linkGroup.appendChild(path);
+  });
+  nodeGroup.replaceChildren();
+  modules.forEach(module => {
+    const position = customModulePosition(module);
+    const size = customModuleSize(module);
+    const node = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    node.setAttribute("class", `topo-custom-node custom-kind-${module.kind || "generic"}`);
+    node.setAttribute("transform", `translate(${position.x},${position.y})`);
+    node.dataset.layoutId = module.id;
+    node.dataset.customModule = module.id;
+    node.setAttribute("role", "button");
+    node.setAttribute("tabindex", "0");
+    node.setAttribute("aria-label", `自定义模块 ${module.name || module.id}`);
+    node.innerHTML = `<rect width="${size.width}" height="${size.height}" rx="6" />
+      <text x="${size.width / 2}" y="23" text-anchor="middle" class="custom-node-title">${esc(module.name || "自定义模块")}</text>
+      <text x="${size.width / 2}" y="43" text-anchor="middle" class="custom-node-meta">仅拓扑展示</text>
+      <path class="topo-resize-handle" d="M${size.width - 14},${size.height - 5} l9,0 l0,-9" />
+      <path class="topo-resize-hit" d="M${size.width - 14},${size.height - 5} l9,0 l0,-9" />`;
+    node.addEventListener("click", () => handleCustomModuleClick(module.id));
+    node.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      handleCustomModuleClick(module.id);
+    });
+    nodeGroup.appendChild(node);
+    node.classList.toggle("link-selected", module.id === customLinkSourceId);
+  });
+  nodeGroup.classList.toggle("link-selecting", Boolean(customLinkSourceId));
+}
+
+function handleCustomModuleClick(id) {
+  if (!state.topologyEditing || state.dragMoved || !customLinkMode) return;
+  if (!customLinkSourceId) {
+    customLinkSourceId = id;
+    $("#topology-link-toggle")?.setAttribute("aria-pressed", "true");
+    updateTopologyEditorControls();
+    setStatus("已选择连线起点，请点击另一个模块");
+    renderCustomTopology();
+    return;
+  }
+  if (customLinkSourceId === id) return;
+  const existing = (topologyLayoutEditor.customLinks || []).some(link =>
+    (link.source === customLinkSourceId && link.target === id) || (link.source === id && link.target === customLinkSourceId));
+  if (!existing) {
+    const before = topologyLayoutEditor.snapshotLayout();
+    topologyLayoutEditor.customLinks.push({ id: `custom-link-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, source: customLinkSourceId, target: id });
+    topologyLayoutEditor.commitLayout(before);
+    renderCustomTopology();
+    updateTopologyEditorControls();
+  }
+  customLinkSourceId = null;
+  updateTopologyEditorControls();
+}
+
+const handleTopologyModuleClick = handleCustomModuleClick;
+
+function addCustomModule() {
+  if (!state.topologyEditing) return;
+  const select = $("#topology-module-type");
+  const kind = select?.value || "generic";
+  const names = { generic: "自定义模块", switch: "过程网交换机", ids: "IDS", sensor: "传感器", controller: "控制接口", attack: "攻击节点" };
+  const id = `custom-module-${Date.now()}`;
+  const x = Math.max(30, Math.round((state.canvasSize?.width || 900) / 2 - 55));
+  const offset = (topologyLayoutEditor.customModules || []).length * 18;
+  const y = Math.max(30, Math.round((state.canvasSize?.height || 700) / 2 - 29 + offset));
+  const before = topologyLayoutEditor.snapshotLayout();
+  topologyLayoutEditor.customModules.push({ id, kind, name: names[kind] || names.generic, x, y, width: 110, height: 58 });
+  NODE_COORDINATES[id] = { x, y };
+  NODE_SIZES[id] = { width: 110, height: 58 };
+  topologyLayoutEditor.positions[id] = { x, y };
+  topologyLayoutEditor.sizes[id] = { width: 110, height: 58 };
+  topologyLayoutEditor.commitLayout(before);
+  renderCustomTopology();
+  applyCanvasSize(state.systemData?.topology?.layout || {}, editedLayerBands(state.systemData?.topology?.layout || {}, state.systemData?.topology?.devices || []));
+  updateTopologyEditorControls();
+  setStatus(`${names[kind] || names.generic}已添加到拓扑图（仅展示）`);
+}
+
+function setCustomLinkMode(enabled) {
+  customLinkMode = Boolean(enabled) && state.topologyEditing;
+  customLinkSourceId = null;
+  $("#topology-link-toggle")?.setAttribute("aria-pressed", String(customLinkMode));
+  renderCustomTopology();
+  updateTopologyEditorControls();
 }
 
 /* 图例只展示当前场景实际存在的链路类型；“影响信号”仅在有电磁干扰链路时出现 */
@@ -1952,7 +2089,13 @@ function renderNetworkAssets(data) {
          <text x="12" y="62" class="network-status"></text>
           <path class="topo-resize-handle" d="M${asset.width - 14},${asset.height - 5} l9,0 l0,-9" />
           <path class="topo-resize-hit" d="M${asset.width - 14},${asset.height - 5} l9,0 l0,-9" />`;
-      node.addEventListener("click", () => selectNetworkAsset(asset.id));
+      node.addEventListener("click", () => {
+        if (customLinkMode) {
+          handleTopologyModuleClick(asset.id);
+          return;
+        }
+        selectNetworkAsset(asset.id);
+      });
       node.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
@@ -2203,6 +2346,7 @@ function renderTopology(data) {
   const linksGroup = $("#topo-links");
   const nodesGroup = $("#topo-nodes");
   renderNetworkAssets(data);
+  renderCustomTopology();
 
   // 网络接入线按交换机端口绘制，业务关系仅用于报文路径。
   renderTopologyLinks();
@@ -2249,6 +2393,10 @@ function renderTopology(data) {
 
       g.addEventListener("click", () => {
         if (state.dragMoved) return; // 刚拖动过视口，避免误选设备
+        if (customLinkMode) {
+          handleTopologyModuleClick(id);
+          return;
+        }
         state.selectedDeviceId = id;
         document.querySelectorAll(".topo-node").forEach((node) => node.classList.remove("selected"));
         g.classList.add("selected");
@@ -2778,6 +2926,7 @@ function syncTopologyPositions() {
     if (handle) handle.setAttribute("d", `M${size.width - 14},${size.height - 5} l9,0 l0,-9`);
   });
 
+  renderCustomTopology();
   renderTopologyLinks();
 }
 
@@ -3076,6 +3225,8 @@ function bindEvents() {
     if (status) status.textContent = saved ? "已保存在此浏览器" : "本地保存失败";
     setStatus(saved ? "布局已保存在此浏览器，不会修改场景文件" : "浏览器不允许本地存储，布局未保存", !saved);
   });
+  $("#topology-add-module")?.addEventListener("click", addCustomModule);
+  $("#topology-link-toggle")?.addEventListener("click", () => setCustomLinkMode(!customLinkMode));
   const zoomReset = $("#zoom-reset");
   if (zoomReset) zoomReset.addEventListener("click", resetTopoView);
 

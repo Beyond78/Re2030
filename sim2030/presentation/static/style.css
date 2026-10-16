@@ -29,6 +29,19 @@
 .topo-resize-hit { fill: none; stroke: transparent; stroke-width: 18; opacity: 0; pointer-events: none; }
 .topology-editing .topo-resize-handle { opacity: .85; cursor: nwse-resize; }
 .topology-editing .topo-resize-hit { pointer-events: stroke; cursor: nwse-resize; }
+.topo-custom-node { cursor: pointer; }
+.topology-editing .topo-custom-node { cursor: grab; }
+.topo-custom-node:active { cursor: grabbing; }
+.topo-custom-node rect { fill: #25364a; stroke: #67e8f9; stroke-width: 1.6; stroke-dasharray: 4 2; }
+.topo-custom-node:hover rect, .topo-custom-node.link-selected rect { fill: #304961; stroke: #fbbf24; stroke-width: 2; }
+.topo-custom-node .custom-node-title { fill: #e0f2fe; font-size: 11px; pointer-events: none; }
+.topo-custom-node .custom-node-meta { fill: #93c5fd; font-size: 9px; pointer-events: none; }
+.topo-custom-node.custom-kind-attack rect { fill: #452532; stroke: #fb7185; }
+.topo-custom-node.custom-kind-ids rect { fill: #302b4d; stroke: #c4b5fd; }
+.topo-custom-node.custom-kind-sensor rect { fill: #193d43; stroke: #5eead4; }
+.topo-custom-link { stroke: #67e8f9; stroke-width: 2; stroke-dasharray: 7 4; opacity: .9; pointer-events: stroke; }
+.topology-module-type { max-width: 112px; min-height: 26px; background: #132238; border: 1px solid #334b68; color: #cfe3f6; border-radius: 4px; font-size: 11px; }
+.topo-edit-controls button[aria-pressed="true"] { color: #fde68a; border-color: #f59e0b; background: rgba(245, 158, 11, .12); }
 .network-asset rect { fill: #112438; stroke: #49718b; stroke-width: 1.5; }
 .network-asset.probe rect, .network-asset.manager rect { fill: #1b1c34; stroke: #8374b7; }
 .network-asset.selected rect, .network-asset:focus-visible rect { stroke: #e2e8f0; stroke-width: 2.5; }
@@ -755,7 +768,8 @@ body {
 .playback-overlay {
   position: absolute;
   left: 14px;
-  top: 50%;
+  /* Keep the default panel below the topology toolbar so it cannot block edit controls. */
+  top: calc(50% + 92px);
   transform: translateY(-50%);
   z-index: 30;
   width: 232px;
