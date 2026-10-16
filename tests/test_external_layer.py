@@ -86,6 +86,20 @@ class TestExternalWirelessExchange(unittest.TestCase):
         self.assertIn("peer_station", overview)
         self.assertEqual(overview["peer_station"]["grid_state"], "normal")
 
+    def test_live_scenario_satellite_syncs_both_time_services(self):
+        """复数授时系统：同一广播周期内卫星同时向两套授时系统下发时间基准。"""
+        config = load_scenario(LIVE_SCENARIO_PATH)
+        engine = SimulationEngine()
+        engine.build(config.devices, config.links, config.environment, entry_id="station")
+        engine.step(0, 100000)               # 卫星在 t=0 广播
+        result = engine.step(20000, 100000)  # 20ms 无线时延后送达
+        receivers = {
+            message.receiver_id for message in result.messages
+            if message.sender_id == "gnss_sat" and message.business_type == BusinessType.SYNC
+        }
+        self.assertEqual(receivers, {"time_svc", "time_svc_2"})
+        self.assertEqual(engine.get_management(["time_svc_2"])["time_svc_2"]["state"]["sync_state"], "synced")
+
 
 if __name__ == "__main__":
     unittest.main()

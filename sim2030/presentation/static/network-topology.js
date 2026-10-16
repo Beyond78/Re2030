@@ -5,6 +5,11 @@ const NetworkTopology = (() => {
   const endpointId = (endpoint) => Array.isArray(endpoint) ? endpoint[0] : endpoint;
   const center = (p) => ({ x: p.x + 45, y: p.y + 24 });
   const pathData = (points) => points.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
+  /* 交换机接入端口：左侧边排列，上方设备与下方设备各最多分开显示三条线，
+     装不下的接入并入该侧最下面那条（与相邻设备共用一条线）。 */
+  const PORT_MARGIN = 12;
+  const PORT_SPACING = 12;
+  const MAX_LANES_PER_SIDE = 3;
 
   function pointAt(points, progress) {
     if (!points.length) return { x: 0, y: 0 };
@@ -37,11 +42,55 @@ const NetworkTopology = (() => {
       const probe = { ...network.probe, kind: "probe", network_id: network.id };
       assets.push(sw, probe);
       const access = new Map();
-      network.connections.forEach((connection, index) => {
+      // 上方设备与下方设备各最多分开显示 MAX_LANES_PER_SIDE 条线，且线条总数不超过左侧边容量。
+      const capacity = Math.max(1, Math.floor((sw.height - 2 * PORT_MARGIN) / PORT_SPACING) + 1);
+      const centerY = sw.y + sw.height / 2;
+      const entries = network.connections.map((connection) => {
         const coord = coordinates[connection.device_id];
-        if (!coord) return;
+        if (!coord) return null;
         const anchor = { x: coord.x + connection.anchor_x, y: coord.y + connection.anchor_y };
-        const port = { x: sw.x, y: sw.y + 14 + index * 12 };
+        return { connection, anchor, side: anchor.y < centerY ? "above" : "below" };
+      }).filter(Boolean);
+
+      // 每侧按 x 升序：index 0 为离交换机最远的设备。
+      const sides = {
+        above: entries.filter((item) => item.side === "above").sort((a, b) => a.anchor.x - b.anchor.x),
+        below: entries.filter((item) => item.side === "below").sort((a, b) => a.anchor.x - b.anchor.x),
+      };
+      const lanes = {
+        above: Math.min(sides.above.length, MAX_LANES_PER_SIDE),
+        below: Math.min(sides.below.length, MAX_LANES_PER_SIDE),
+      };
+      while (lanes.above + lanes.below > capacity) {
+        if (lanes.above > lanes.below) lanes.above -= 1;
+        else if (lanes.below > 0) lanes.below -= 1;
+        else if (lanes.above > 0) lanes.above -= 1;
+        else break;
+      }
+
+      const placements = [];
+      for (const side of ["above", "below"]) {
+        const group = sides[side];
+        if (!group.length) continue;
+        const laneCount = Math.max(1, Math.min(lanes[side], group.length));
+        group.forEach((item, index) => {
+          // 离交换机最远的设备优先独占一条线；靠得近的溢出接入并入该侧最外侧
+          // 那条线（lane 0：上方为最上、下方为最下），与相邻设备共用同一条。
+          const lane = index < laneCount ? laneCount - 1 - index : 0;
+          placements.push({
+            connection: item.connection,
+            anchor: item.anchor,
+            port: {
+              x: sw.x,
+              y: side === "above"
+                ? sw.y + PORT_MARGIN + lane * PORT_SPACING
+                : sw.y + sw.height - PORT_MARGIN - lane * PORT_SPACING,
+            },
+          });
+        });
+      }
+
+      placements.forEach(({ connection, anchor, port }) => {
         const points = [anchor, { x: anchor.x, y: port.y }, port];
         access.set(connection.device_id, points);
         interfaces.push({ ...connection, network_id: network.id, anchor, port });

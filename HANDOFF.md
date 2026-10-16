@@ -193,8 +193,10 @@ body 示例：
 
 前端 `sim2030/presentation/static/` 已完成态势拓扑页，可直接“双击即跑”，无构建工具：
 
-1. **拓扑图**：内联 SVG 按 `external / station / bay / process` 四层绘制 17 个设备与 19 条链路；链路端点取自 `topology.links[].endpoint_a[0]` → `endpoint_b[0]`。
-   “外界层”位于站控层之上：授时卫星（`gnss_sat`）无线接入授时系统，其他电站（`peer_station`）无线接入站端监控。
+1. **拓扑图**：内联 SVG 按 `external / station / bay / process` 四层绘制 21 个设备与 28 条链路；链路端点取自 `topology.links[].endpoint_a[0]` → `endpoint_b[0]`。
+   “外界层”位于站控层之上：授时卫星（`gnss_sat`）无线接入两套授时系统，其他电站（`peer_station`）无线接入站端监控。
+   授时/采集链路为并列两列：`time_svc`+`mu`+`ct_current` 与 `time_svc_2`+`mu_2`+`ct_current_2`，分别在 `x=465` 与 `x=735`；卫星居中（`x=600`）同时向两套授时系统广播时间基准。冷却系统控制接口与冷却风机占过程层最右列（`x=870`）。
+   两套合并单元都经过程网把量测送往测控装置、过流保护装置与差动保护装置：测控装置按来源分组上送（`sources`），站端如实分列显示并提示“两套量测不一致”；过流保护逐来源判断，任一来源持续越限即跳闸并标注触发来源；差动保护（`diff_prot`，间隔层）比较两套量测的绝对差，越限即跳闸，整定值可在演示平面修改。`ct_current_2` 通过 `channel: "ct_current"` 与首套共用同一量测通道名。
 2. **设备状态可视**：
    - `effects` 非空 → 红色（受攻击作用影响）
    - 出现在 `recognition[].target_asset_ids / affected_asset_ids` → 琥珀色（疑似异常）

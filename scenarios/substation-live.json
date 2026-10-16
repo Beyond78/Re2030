@@ -33,6 +33,7 @@
       "ports": {
         "mc_breaker": "mc",
         "prot": "prot",
+        "diff_prot": "diff_prot",
         "peer": "peer"
       },
       "parameters": {
@@ -97,6 +98,28 @@
       }
     },
     {
+      "device_id": "diff_prot",
+      "layout": {"x": 465, "y": 356},
+      "device_type": "differential_protection",
+      "layer": "bay",
+      "name": "差动保护装置",
+      "ports": {
+        "in": "in",
+        "out": "out",
+        "up": "up"
+      },
+      "parameters": {
+        "in_port": "in",
+        "out_port": "out",
+        "up_port": "up",
+        "eval_interval_us": 100000,
+        "value_key": "ct_current",
+        "compare_mode": "absolute",
+        "differential_threshold_a": 10.0,
+        "duration_ticks": 1
+      }
+    },
+    {
       "device_id": "ctl_brk",
       "layout": {"x": 60, "y": 588},
       "device_type": "control_interface",
@@ -128,7 +151,7 @@
     },
     {
       "device_id": "ctl_cool",
-      "layout": {"x": 330, "y": 588},
+      "layout": {"x": 870, "y": 588},
       "device_type": "control_interface",
       "layer": "process",
       "name": "冷却系统控制接口",
@@ -209,7 +232,7 @@
     },
     {
       "device_id": "cool",
-      "layout": {"x": 330, "y": 728},
+      "layout": {"x": 870, "y": 728},
       "device_type": "auxiliary",
       "layer": "process",
       "name": "冷却风机",
@@ -238,7 +261,7 @@
     },
     {
       "device_id": "comp",
-      "layout": {"x": 735, "y": 588},
+      "layout": {"x": 600, "y": 588},
       "device_type": "compensation",
       "layer": "process",
       "name": "无功补偿支路",
@@ -267,7 +290,7 @@
     },
     {
       "device_id": "ct_current",
-      "layout": {"x": 600, "y": 728},
+      "layout": {"x": 465, "y": 728},
       "device_type": "sensor",
       "layer": "process",
       "name": "电流互感器",
@@ -281,8 +304,24 @@
       }
     },
     {
-      "device_id": "vt_voltage",
+      "device_id": "ct_current_2",
       "layout": {"x": 735, "y": 728},
+      "device_type": "sensor",
+      "layer": "process",
+      "name": "电流互感器-2",
+      "ports": {
+        "up": "up"
+      },
+      "parameters": {
+        "input_key": "line_current_a",
+        "channel": "ct_current",
+        "unit": "A",
+        "sample_interval_us": 100000
+      }
+    },
+    {
+      "device_id": "vt_voltage",
+      "layout": {"x": 600, "y": 728},
       "device_type": "sensor",
       "layer": "process",
       "name": "电压互感器",
@@ -297,7 +336,7 @@
     },
     {
       "device_id": "oil_temp",
-      "layout": {"x": 465, "y": 728},
+      "layout": {"x": 330, "y": 728},
       "device_type": "sensor",
       "layer": "process",
       "name": "油温传感器",
@@ -313,7 +352,7 @@
     },
     {
       "device_id": "mu",
-      "layout": {"x": 600, "y": 588},
+      "layout": {"x": 465, "y": 588},
       "device_type": "acquisition",
       "layer": "process",
       "name": "合并单元",
@@ -328,11 +367,43 @@
       }
     },
     {
+      "device_id": "mu_2",
+      "layout": {"x": 735, "y": 588},
+      "device_type": "acquisition",
+      "layer": "process",
+      "name": "合并单元-2",
+      "ports": {
+        "in": "in",
+        "out": "out"
+      },
+      "parameters": {
+        "report_interval_us": 100000,
+        "out_port": "out",
+        "output_business_type": "sampling"
+      }
+    },
+    {
       "device_id": "time_svc",
-      "layout": {"x": 600, "y": 180},
+      "layout": {"x": 465, "y": 180},
       "device_type": "time_service",
       "layer": "station",
       "name": "授时系统",
+      "ports": {
+        "sync": "sync",
+        "gnss": "gnss"
+      },
+      "parameters": {
+        "sync_port": "sync",
+        "sync_interval_us": 1000000,
+        "time_source": "gnss"
+      }
+    },
+    {
+      "device_id": "time_svc_2",
+      "layout": {"x": 735, "y": 180},
+      "device_type": "time_service",
+      "layer": "station",
+      "name": "授时系统-2",
       "ports": {
         "sync": "sync",
         "gnss": "gnss"
@@ -429,6 +500,66 @@
       }
     },
     {
+      "link_id": "L-mu_2-mc",
+      "endpoint_a": [
+        "mu_2",
+        "out"
+      ],
+      "endpoint_b": [
+        "mc",
+        "mu"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 500
+      }
+    },
+    {
+      "link_id": "L-mu_2-prot",
+      "endpoint_a": [
+        "mu_2",
+        "out"
+      ],
+      "endpoint_b": [
+        "prot",
+        "in"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 500
+      }
+    },
+    {
+      "link_id": "L-mu-diff_prot",
+      "endpoint_a": [
+        "mu",
+        "out"
+      ],
+      "endpoint_b": [
+        "diff_prot",
+        "in"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 500
+      }
+    },
+    {
+      "link_id": "L-mu_2-diff_prot",
+      "endpoint_a": [
+        "mu_2",
+        "out"
+      ],
+      "endpoint_b": [
+        "diff_prot",
+        "in"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 500
+      }
+    },
+    {
       "link_id": "L-ct-mu",
       "endpoint_a": [
         "ct_current",
@@ -436,6 +567,21 @@
       ],
       "endpoint_b": [
         "mu",
+        "in"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 200
+      }
+    },
+    {
+      "link_id": "L-ct_current_2-mu_2",
+      "endpoint_a": [
+        "ct_current_2",
+        "up"
+      ],
+      "endpoint_b": [
+        "mu_2",
         "in"
       ],
       "link_type": "wired",
@@ -534,6 +680,21 @@
       }
     },
     {
+      "link_id": "L-diff_prot-brk",
+      "endpoint_a": [
+        "diff_prot",
+        "out"
+      ],
+      "endpoint_b": [
+        "ctl_brk",
+        "up"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 800
+      }
+    },
+    {
       "link_id": "L-prot-station",
       "endpoint_a": [
         "prot",
@@ -542,6 +703,21 @@
       "endpoint_b": [
         "station",
         "prot"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 1000
+      }
+    },
+    {
+      "link_id": "L-diff_prot-station",
+      "endpoint_a": [
+        "diff_prot",
+        "up"
+      ],
+      "endpoint_b": [
+        "station",
+        "diff_prot"
       ],
       "link_type": "wired",
       "parameters": {
@@ -633,6 +809,21 @@
       }
     },
     {
+      "link_id": "L-time_svc_2-mu_2",
+      "endpoint_a": [
+        "time_svc_2",
+        "sync"
+      ],
+      "endpoint_b": [
+        "mu_2",
+        "in"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 200
+      }
+    },
+    {
       "link_id": "L-gnss-time_svc",
       "endpoint_a": [
         "gnss_sat",
@@ -640,6 +831,22 @@
       ],
       "endpoint_b": [
         "time_svc",
+        "gnss"
+      ],
+      "link_type": "wireless",
+      "parameters": {
+        "delay_us": 20000,
+        "loss_rate": 0.0
+      }
+    },
+    {
+      "link_id": "L-gnss-time_svc_2",
+      "endpoint_a": [
+        "gnss_sat",
+        "down"
+      ],
+      "endpoint_b": [
+        "time_svc_2",
         "gnss"
       ],
       "link_type": "wireless",
@@ -679,7 +886,7 @@
       "title": "外部信号与站间业务",
       "x": 12,
       "y": 44,
-      "width": 840,
+      "width": 975,
       "height": 94
     },
     {
@@ -687,7 +894,7 @@
       "title": "站控层",
       "x": 12,
       "y": 150,
-      "width": 840,
+      "width": 975,
       "height": 94
     },
     {
@@ -695,7 +902,7 @@
       "title": "间隔层",
       "x": 12,
       "y": 322,
-      "width": 840,
+      "width": 975,
       "height": 98
     },
     {
@@ -703,7 +910,7 @@
       "title": "过程层",
       "x": 12,
       "y": 550,
-      "width": 840,
+      "width": 975,
       "height": 262
     }
   ],
@@ -718,7 +925,7 @@
         "switch": {
           "id": "sw-station",
           "name": "站控网交换机",
-          "x": 890,
+          "x": 1025,
           "y": 253,
           "width": 142,
           "height": 64
@@ -726,7 +933,7 @@
         "probe": {
           "id": "ids-station",
           "name": "站控网 IDS",
-          "x": 1070,
+          "x": 1205,
           "y": 253,
           "width": 155,
           "height": 64,
@@ -746,7 +953,8 @@
             "anchor_y": 48,
             "business_ports": [
               "mc_breaker",
-              "prot"
+              "prot",
+              "diff_prot"
             ]
           },
           {
@@ -768,11 +976,22 @@
             "business_ports": [
               "up"
             ]
+          },
+          {
+            "device_id": "diff_prot",
+            "interface_id": "ETH-ST",
+            "switch_port": "P4",
+            "anchor_x": 45,
+            "anchor_y": 0,
+            "business_ports": [
+              "up"
+            ]
           }
         ],
         "link_ids": [
           "L-station-mc",
-          "L-prot-station"
+          "L-prot-station",
+          "L-diff_prot-station"
         ]
       },
       {
@@ -782,7 +1001,7 @@
         "switch": {
           "id": "sw-process",
           "name": "过程网交换机",
-          "x": 890,
+          "x": 1025,
           "y": 438,
           "width": 142,
           "height": 90
@@ -790,7 +1009,7 @@
         "probe": {
           "id": "ids-process",
           "name": "过程网 IDS",
-          "x": 1070,
+          "x": 1205,
           "y": 451,
           "width": 155,
           "height": 64,
@@ -803,10 +1022,10 @@
         "mirror_direction": "both",
         "connections": [
           {
-            "device_id": "prot",
+            "device_id": "diff_prot",
             "interface_id": "ETH-PR",
             "switch_port": "P1",
-            "anchor_x": 65,
+            "anchor_x": 45,
             "anchor_y": 48,
             "business_ports": [
               "in",
@@ -827,17 +1046,18 @@
             ]
           },
           {
-            "device_id": "ctl_brk",
+            "device_id": "prot",
             "interface_id": "ETH-PR",
             "switch_port": "P3",
-            "anchor_x": 45,
-            "anchor_y": 0,
+            "anchor_x": 65,
+            "anchor_y": 48,
             "business_ports": [
-              "up"
+              "in",
+              "out"
             ]
           },
           {
-            "device_id": "ctl_tap",
+            "device_id": "ctl_brk",
             "interface_id": "ETH-PR",
             "switch_port": "P4",
             "anchor_x": 45,
@@ -847,7 +1067,7 @@
             ]
           },
           {
-            "device_id": "ctl_cool",
+            "device_id": "ctl_tap",
             "interface_id": "ETH-PR",
             "switch_port": "P5",
             "anchor_x": 45,
@@ -865,20 +1085,49 @@
             "business_ports": [
               "out"
             ]
+          },
+          {
+            "device_id": "mu_2",
+            "interface_id": "ETH-PR",
+            "switch_port": "P7",
+            "anchor_x": 45,
+            "anchor_y": 0,
+            "business_ports": [
+              "out"
+            ]
+          },
+          {
+            "device_id": "ctl_cool",
+            "interface_id": "ETH-PR",
+            "switch_port": "P8",
+            "anchor_x": 45,
+            "anchor_y": 0,
+            "business_ports": [
+              "up"
+            ]
           }
         ],
         "link_ids": [
           "L-mu-mc",
           "L-mu-prot",
+          "L-mu_2-mc",
+          "L-mu_2-prot",
+          "L-mu-diff_prot",
+          "L-mu_2-diff_prot",
           "L-mc-brk",
           "L-mc-tap",
           "L-mc-cool",
-          "L-prot-brk"
+          "L-prot-brk",
+          "L-diff_prot-brk"
         ]
       }
     ],
     "direct_links": {
       "L-ct-mu": {
+        "role": "measurement",
+        "label": "传感器采集接线"
+      },
+      "L-ct_current_2-mu_2": {
         "role": "measurement",
         "label": "传感器采集接线"
       },
@@ -891,6 +1140,10 @@
         "label": "传感器采集接线"
       },
       "L-time-mu": {
+        "role": "timing",
+        "label": "专用对时连接"
+      },
+      "L-time_svc_2-mu_2": {
         "role": "timing",
         "label": "专用对时连接"
       },
@@ -907,11 +1160,11 @@
             "y": 798
           },
           {
-            "x": 510,
+            "x": 375,
             "y": 798
           },
           {
-            "x": 510,
+            "x": 375,
             "y": 776
           }
         ]
@@ -920,7 +1173,7 @@
     "manager": {
       "id": "security-manager",
       "name": "安全监测平台",
-      "x": 1070,
+      "x": 1205,
       "y": 80,
       "width": 155,
       "height": 72

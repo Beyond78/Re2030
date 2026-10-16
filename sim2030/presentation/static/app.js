@@ -334,6 +334,7 @@ const DEVICE_NAME_MAP = {
   station: "站端监控系统",
   time_svc: "授时系统",
   prot: "过流保护装置",
+  diff_prot: "差动保护装置",
   mc: "测控装置",
   ctl_brk: "断路器智能终端",
   ctl_tap: "分接机构控制接口",
@@ -346,6 +347,9 @@ const DEVICE_NAME_MAP = {
   vt_voltage: "电压互感器",
   oil_temp: "油温传感器",
   mu: "合并单元",
+  time_svc_2: "授时系统-2",
+  mu_2: "合并单元-2",
+  ct_current_2: "电流互感器-2",
 };
 
 /* 面向人类阅读的监控交互翻译辅助 */
@@ -406,25 +410,20 @@ function fmtValue(value, digits = 2) {
   return n.toFixed(digits);
 }
 
-function extractSample(payload) {
-  if (!payload || typeof payload !== "object") return null;
-  const sample = payload.sample || payload;
-  if (sample && typeof sample === "object" && sample.samples && Object.keys(sample.samples).length) {
-    return sample;
-  }
-  return null;
-}
-
-function renderSample(sample) {
+function renderSample(sample, options = {}) {
   if (!sample || !sample.samples) return "";
   const samples = sample.samples || {};
   const units = sample.units || {};
+  const divergent = options.divergent instanceof Set ? options.divergent : new Set();
+  const mark = (channel, text) => divergent.has(channel)
+    ? `<span class="monitor-diverge" title="两套量测数值不一致">${text}</span>`
+    : text;
   const parts = [];
-  if ("ct_current" in samples) parts.push(`线路电流 ${fmtValue(samples.ct_current)} ${units.ct_current || "A"}`);
-  if ("vt_voltage" in samples) parts.push(`母线电压 ${fmtValue(samples.vt_voltage)} ${units.vt_voltage || "kV"}`);
-  if ("oil_temp" in samples) parts.push(`油温 ${fmtValue(samples.oil_temp, 1)} ${units.oil_temp === "C" ? "℃" : (units.oil_temp || "℃")}`);
+  if ("ct_current" in samples) parts.push(mark("ct_current", `线路电流 ${fmtValue(samples.ct_current)} ${units.ct_current || "A"}`));
+  if ("vt_voltage" in samples) parts.push(mark("vt_voltage", `母线电压 ${fmtValue(samples.vt_voltage)} ${units.vt_voltage || "kV"}`));
+  if ("oil_temp" in samples) parts.push(mark("oil_temp", `油温 ${fmtValue(samples.oil_temp, 1)} ${units.oil_temp === "C" ? "℃" : (units.oil_temp || "℃")}`));
   if (parts.length === 0) {
-    return Object.entries(samples).map(([k, v]) => `${esc(k)} ${fmtValue(v)}`).join(" · ");
+    return Object.entries(samples).map(([k, v]) => mark(k, `${esc(k)} ${fmtValue(v)}`)).join(" · ");
   }
   return parts.join(" · ");
 }
@@ -436,6 +435,36 @@ function monitorRow(timeUs, badge, text) {
           <span class="monitor-type">${esc(badge)}</span>
           <span class="monitor-text">${text}</span>
         </div>`;
+}
+
+/* 量测来源归属与双套数值比对：纯数据逻辑在 measurement-sources.js，这里只做渲染。
+   比较结果仅用于展示提示，不参与攻击判定（攻击判定只在识别平面）。 */
+function extractSources(payload) {
+  return MeasurementSources.extract(payload);
+}
+
+function compareSources(sources) {
+  return MeasurementSources.compare(sources);
+}
+
+/* 按来源逐条渲染量测值，始终标注该读数来自哪一套采集单元。 */
+function renderSourceRows(sources, badge = "量测") {
+  const names = Object.keys(sources || {});
+  if (!names.length) return "";
+  const compare = compareSources(sources);
+  let html = "";
+  names.forEach((name) => {
+    const sample = sources[name];
+    html += monitorRow(
+      sample.sample_time_us || 0,
+      badge,
+      `来自 <strong>${esc(deviceName(name))}</strong><span class="monitor-sample">${renderSample(sample, { divergent: compare.divergent })}</span>`,
+    );
+  });
+  if (compare.inconsistent) {
+    html += '<div class="monitor-notice">两套量测数值不一致（仅展示层数值比对，不构成攻击判定）</div>';
+  }
+  return html;
 }
 
 /* 设备控制面板：能力描述由后端下发，前端只负责渲染。
@@ -1458,7 +1487,7 @@ function getDeviceDynamicText(devId, mgmt, env) {
   }
 
   // 传感器读数（度数）：显示本机采样结果，可能已被攻击篡改
-  if (devId === "ct_current") {
+  if (devId === "ct_current" || devId === "ct_current_2") {
     return sensorReadingText(s, env?.line_current_a, "A", 1);
   }
   if (devId === "vt_voltage") {
@@ -1467,7 +1496,7 @@ function getDeviceDynamicText(devId, mgmt, env) {
   if (devId === "oil_temp") {
     return sensorReadingText(s, mgmt["tap"]?.state?.oil_temp_c, "℃", 1);
   }
-  if (devId === "mu") {
+  if (devId === "mu" || devId === "mu_2") {
     return "[采集合并]";
   }
   if (devId === "prot") {
@@ -1484,12 +1513,20 @@ function getDeviceDynamicText(devId, mgmt, env) {
     const tx = (overview.last_dispatched || []).length;
     return `[监视 收${rx} 发${tx}]`;
   }
-  if (devId === "time_svc") {
+  if (devId === "time_svc" || devId === "time_svc_2") {
     if (s.sync_state === "spoofed") {
       const offMs = s.timing_offset_us != null ? Math.round(Number(s.timing_offset_us) / 1000) : "";
       return offMs !== "" ? `[授时被欺骗 +${offMs}ms]` : "[授时被欺骗]";
     }
     return "[GNSS授时]";
+  }
+  if (devId === "diff_prot") {
+    const last = overview.last_differential;
+    if (last && last.exceeded) {
+      return `[差流 ${fmtValue(last.difference, 1)}A ≥ 整定 ${fmtValue(last.threshold, 1)}A]`;
+    }
+    const threshold = overview.differential_threshold_a;
+    return threshold != null ? `[差流整定 ${fmtValue(threshold, 1)}A]` : "[差流整定 -]";
   }
   if (devId === "gnss_sat" || devId === "peer_station") {
     return "";
@@ -2206,9 +2243,22 @@ function renderStationMonitor(overview) {
     received.slice(-4).reverse().forEach((r) => {
       const typeZh = zhBusiness(r.type);
       const fromZh = deviceName(r.from);
+      const action = (r.payload || {}).action;
       let text = `来自 <strong>${esc(fromZh)}</strong> · ${esc(typeZh)}`;
-      const sample = extractSample(r.payload);
-      if (sample) text += `<span class="monitor-sample">${renderSample(sample)}</span>`;
+      if (action) text += ` · ${esc(zhAction(action))}`;
+      const differential = (r.payload || {}).differential;
+      if (differential) {
+        text += ` · 差流 ${fmtValue(differential.difference_a)} A / 整定 ${fmtValue(differential.threshold_a)} A`;
+      }
+      const sources = extractSources(r.payload);
+      if (Object.keys(sources).length) {
+        const compare = compareSources(sources);
+        const detail = Object.entries(sources)
+          .map(([name, sample]) => `来自 ${esc(deviceName(name))} ${renderSample(sample, { divergent: compare.divergent })}`)
+          .join(" · ");
+        text += `<span class="monitor-sample">${detail}</span>`;
+        if (compare.inconsistent) text += '<span class="monitor-diverge-tag">量测不一致</span>';
+      }
       html += monitorRow(r.time_us, typeZh, text);
     });
   }
@@ -2235,11 +2285,13 @@ function renderMcMonitor(overview) {
   let html = "";
   const commands = Array.isArray(overview.last_commands) ? overview.last_commands : [];
   const feedback = Array.isArray(overview.last_feedback) ? overview.last_feedback : [];
-  const latest = extractSample(overview.latest_sample);
+  const sources = Object.keys(overview.samples_by_source || {}).length
+    ? overview.samples_by_source
+    : extractSources({ sample: overview.latest_sample });
 
-  if (latest) {
-    html += '<div class="monitor-log-title">最新采样</div>';
-    html += monitorRow(latest.sample_time_us || 0, "量测", renderSample(latest));
+  if (Object.keys(sources).length) {
+    html += '<div class="monitor-log-title">最新量测（按来源）</div>';
+    html += renderSourceRows(sources);
   }
 
   if (commands.length) {
