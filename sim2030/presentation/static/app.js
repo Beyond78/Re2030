@@ -54,7 +54,11 @@ async function api(method, path, body) {
   }
   try {
     const response = await fetch(path, options);
-    return await response.json();
+    const payload = await response.json();
+    if (!response.ok && !payload.error) {
+      payload.error = `请求失败（HTTP ${response.status}）`;
+    }
+    return payload;
   } catch (err) {
     console.error("API error:", err);
     return { error: String(err) };
@@ -288,6 +292,7 @@ async function createRun() {
   state.viewRequest++;
   renderPlaybackControls();
   const scenarioId = state.selectedScenario;
+  let createdRunId = null;
   try {
     if (simulationPlayer.status === "running") {
       if (!await simulationPlayer.command("pause")) return;
@@ -295,6 +300,7 @@ async function createRun() {
     setStatus("正在创建仿真运行...");
     const payload = await api("POST", "/api/runs", { scenario_id: scenarioId });
     if (payload.error) { setStatus(payload.error, true); return; }
+    createdRunId = payload.run_id;
     state.runId = payload.run_id;
     simulationPlayer.bind(payload.run_id, payload);
     state.renderedTopologyOnce = false;
@@ -302,7 +308,14 @@ async function createRun() {
     $("#run-id").title = payload.run_id;
     setStatus(`运行已创建：${payload.run_id}`);
     startPolling();
-    await refreshViews();
+    if (await refreshViews() === false) {
+      setStatus(`运行已创建，但页面数据加载失败（RUN ID: ${payload.run_id}）。请点击刷新重试。`, true);
+    }
+  } catch (error) {
+    console.error("Create run failed:", error);
+    setStatus(createdRunId
+      ? `运行已创建，但拓扑加载失败（RUN ID: ${createdRunId}）：${error.message || error}`
+      : `创建运行失败：${error.message || error}`, true);
   } finally {
     state.loadingRun = false;
     renderPlaybackControls();

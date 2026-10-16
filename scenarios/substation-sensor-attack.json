@@ -1,6 +1,6 @@
 {
   "scenario_id": "substation-sensor-attack",
-  "name": "传感器攻击",
+  "name": "变电站传感器攻击场景",
   "observation_mode": "file_replay",
   "seed": 2030,
   "simulation": {
@@ -246,7 +246,11 @@
       },
       "parameters": {
         "control_port": "control",
-        "initial_running": false
+        "initial_running": false,
+        "initial_speed_ratio": 1.0,
+        "vibration_running_mm_s": 3.2,
+        "motor_current_running_a": 8.5,
+        "rated_speed_rpm": 1480
       },
       "capabilities": [
         {
@@ -267,7 +271,7 @@
       "device_id": "comp",
       "layout": {
         "x": 735,
-        "y": 588
+        "y": 858
       },
       "device_type": "compensation",
       "layer": "process",
@@ -298,7 +302,7 @@
     {
       "device_id": "ct_current",
       "layout": {
-        "x": 600,
+        "x": 665,
         "y": 728
       },
       "device_type": "sensor",
@@ -316,7 +320,7 @@
     {
       "device_id": "vt_voltage",
       "layout": {
-        "x": 735,
+        "x": 760,
         "y": 728
       },
       "device_type": "sensor",
@@ -334,7 +338,7 @@
     {
       "device_id": "oil_temp",
       "layout": {
-        "x": 465,
+        "x": 570,
         "y": 728
       },
       "device_type": "sensor",
@@ -353,7 +357,7 @@
     {
       "device_id": "mu",
       "layout": {
-        "x": 600,
+        "x": 665,
         "y": 588
       },
       "device_type": "acquisition",
@@ -370,9 +374,85 @@
       }
     },
     {
+      "device_id": "fan_vibration",
+      "layout": {
+        "x": 465,
+        "y": 678
+      },
+      "device_type": "sensor",
+      "layer": "process",
+      "name": "风机振动传感器",
+      "ports": {
+        "up": "up",
+        "physical": "physical"
+      },
+      "parameters": {
+        "input_key": "vibration_mm_s",
+        "unit": "mm/s",
+        "sample_interval_us": 100000
+      }
+    },
+    {
+      "device_id": "fan_current",
+      "layout": {
+        "x": 465,
+        "y": 738
+      },
+      "device_type": "sensor",
+      "layer": "process",
+      "name": "风机电流传感器",
+      "ports": {
+        "up": "up",
+        "physical": "physical"
+      },
+      "parameters": {
+        "input_key": "motor_current_a",
+        "unit": "A",
+        "sample_interval_us": 100000
+      }
+    },
+    {
+      "device_id": "fan_speed",
+      "layout": {
+        "x": 465,
+        "y": 798
+      },
+      "device_type": "sensor",
+      "layer": "process",
+      "name": "风机转速传感器",
+      "ports": {
+        "up": "up",
+        "physical": "physical"
+      },
+      "parameters": {
+        "input_key": "rotation_speed_rpm",
+        "unit": "r/min",
+        "sample_interval_us": 100000
+      }
+    },
+    {
+      "device_id": "fan_condition_monitor",
+      "layout": {
+        "x": 465,
+        "y": 588
+      },
+      "device_type": "acquisition",
+      "layer": "process",
+      "name": "风机状态监测采集装置",
+      "ports": {
+        "in": "in",
+        "out": "out"
+      },
+      "parameters": {
+        "report_interval_us": 100000,
+        "out_port": "out",
+        "output_business_type": "sampling"
+      }
+    },
+    {
       "device_id": "time_svc",
       "layout": {
-        "x": 600,
+        "x": 665,
         "y": 180
       },
       "device_type": "time_service",
@@ -436,7 +516,7 @@
       "device_id": "sensor_attack_node",
       "layout": {
         "x": 330,
-        "y": 838
+        "y": 858
       },
       "device_type": "em_attack_source",
       "layer": "process",
@@ -546,6 +626,45 @@
       "parameters": {
         "delay_us": 200
       }
+    },
+    {
+      "link_id": "L-fan-vibration-mu",
+      "endpoint_a": ["fan_vibration", "up"],
+      "endpoint_b": ["fan_condition_monitor", "in"],
+      "link_type": "wired",
+      "parameters": {"delay_us": 200}
+    },
+    {
+      "link_id": "L-fan-current-mu",
+      "endpoint_a": ["fan_current", "up"],
+      "endpoint_b": ["fan_condition_monitor", "in"],
+      "link_type": "wired",
+      "parameters": {"delay_us": 200}
+    },
+    {
+      "link_id": "L-fan-speed-mu",
+      "endpoint_a": ["fan_speed", "up"],
+      "endpoint_b": ["fan_condition_monitor", "in"],
+      "link_type": "wired",
+      "parameters": {"delay_us": 200}
+    },
+    {
+      "link_id": "L-cool-fan-vibration",
+      "endpoint_a": ["cool", "physical"],
+      "endpoint_b": ["fan_vibration", "physical"],
+      "link_type": "physical"
+    },
+    {
+      "link_id": "L-cool-fan-current",
+      "endpoint_a": ["cool", "physical"],
+      "endpoint_b": ["fan_current", "physical"],
+      "link_type": "physical"
+    },
+    {
+      "link_id": "L-cool-fan-speed",
+      "endpoint_a": ["cool", "physical"],
+      "endpoint_b": ["fan_speed", "physical"],
+      "link_type": "physical"
     },
     {
       "link_id": "L-mc-brk",
@@ -791,7 +910,7 @@
         "x": 12,
         "y": 550,
         "width": 840,
-        "height": 350
+        "height": 400
       }
     ],
     "deployment": {
@@ -952,6 +1071,16 @@
               "business_ports": [
                 "out"
               ]
+            },
+            {
+              "device_id": "fan_condition_monitor",
+              "interface_id": "ETH-PR",
+              "switch_port": "P7",
+              "anchor_x": 45,
+              "anchor_y": 0,
+              "business_ports": [
+                "out"
+              ]
             }
           ],
           "link_ids": [
@@ -977,6 +1106,48 @@
           "role": "measurement",
           "label": "传感器采集接线"
         },
+        "L-fan-vibration-mu": {
+          "role": "measurement",
+          "label": "风机振动采集"
+        },
+        "L-fan-current-mu": {
+          "role": "measurement",
+          "label": "风机电流采集"
+        },
+        "L-fan-speed-mu": {
+          "role": "measurement",
+          "label": "风机转速采集"
+        },
+        "L-cool-fan-vibration": {
+          "role": "physical",
+          "label": "风机振动测点",
+          "points": [
+            { "x": 420, "y": 752 },
+            { "x": 440, "y": 752 },
+            { "x": 440, "y": 702 },
+            { "x": 465, "y": 702 }
+          ]
+        },
+        "L-cool-fan-current": {
+          "role": "physical",
+          "label": "风机电流测点",
+          "points": [
+            { "x": 420, "y": 752 },
+            { "x": 440, "y": 752 },
+            { "x": 440, "y": 762 },
+            { "x": 465, "y": 762 }
+          ]
+        },
+        "L-cool-fan-speed": {
+          "role": "physical",
+          "label": "风机转速测点",
+          "points": [
+            { "x": 420, "y": 752 },
+            { "x": 440, "y": 752 },
+            { "x": 440, "y": 822 },
+            { "x": 465, "y": 822 }
+          ]
+        },
         "L-time-mu": {
           "role": "timing",
           "label": "专用对时连接"
@@ -1001,6 +1172,14 @@
               "x": 510,
               "y": 776
             }
+          ]
+        },
+        "L-sensor-cool": {
+          "role": "interference",
+          "label": "传感器攻击干扰路径",
+          "points": [
+            { "x": 375, "y": 858 },
+            { "x": 375, "y": 776 }
           ]
         }
       },

@@ -128,7 +128,7 @@ test('the network attack node is a red device cabled to its access switch', () =
 });
 
 test('all scenario layouts keep devices in their layers and IDS mirror ports aligned', () => {
-  for (const filename of ['substation-live.json', 'substation-attack-demo.json', 'substation-em-attack.json', 'substation-network-attack.json']) {
+  for (const filename of ['substation-live.json', 'substation-attack-demo.json', 'substation-em-attack.json', 'substation-network-attack.json', 'substation-sensor-attack.json']) {
     const config = JSON.parse(fs.readFileSync(path.join(__dirname, '../scenarios', filename), 'utf8'));
     const bands = new Map(config.layout.layers.map(b => [b.key, b]));
     for (const device of config.devices) {
@@ -149,5 +149,26 @@ test('all scenario layouts keep devices in their layers and IDS mirror ports ali
     const time = config.devices.find(d => d.device_id === 'time_svc');
     const mu = config.devices.find(d => d.device_id === 'mu');
     assert.equal(time.layout.x, mu.layout.x, 'timing cable must remain vertical');
+
+    if (filename === 'substation-sensor-attack.json') {
+      const fanSensorIds = ['fan_vibration', 'fan_current', 'fan_speed'];
+      const fanSensors = fanSensorIds.map(id => config.devices.find(d => d.device_id === id));
+      assert.ok(fanSensors.every(d => d.layout.x === 465), 'fan sensors must form one vertical column');
+      assert.deepEqual(fanSensors.map(d => d.layout.y), [678, 738, 798]);
+      assert.equal(config.devices.find(d => d.device_id === 'fan_condition_monitor').layout.x, 465,
+        'fan monitor must sit above its sensor column');
+      const originalSensors = ['oil_temp', 'ct_current', 'vt_voltage']
+        .map(id => config.devices.find(d => d.device_id === id));
+      assert.deepEqual(originalSensors.map(d => d.layout.x), [570, 665, 760]);
+      assert.equal(config.devices.find(d => d.device_id === 'mu').layout.x, 665,
+        'merging unit must align with electrical sensors');
+      const attack = config.devices.find(d => d.device_id === 'sensor_attack_node');
+      assert.ok(attack.layout.y > fanSensors.at(-1).layout.y, 'attack source must sit below and clear the sensor group');
+      assert.equal(attack.layout.x, config.devices.find(d => d.device_id === 'cool').layout.x,
+        'attack source must sit below the cooling fan, not the fan sensor column');
+      assert.deepEqual(config.layout.deployment.direct_links['L-sensor-cool'].points,
+        [{ x: attack.layout.x + 45, y: attack.layout.y }, { x: attack.layout.x + 45, y: 776 }],
+        'attack interference path must connect the attack node directly to the cooling fan');
+    }
   }
 });

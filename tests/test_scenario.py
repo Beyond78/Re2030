@@ -52,7 +52,7 @@ class TestLoadScenario(unittest.TestCase):
     def test_load_live_scenario(self):
         config = load_scenario(LIVE_SCENARIO_PATH)
         self.assertEqual(config.scenario_id, "substation-live")
-        self.assertEqual(config.name, "变电站场景")
+        self.assertEqual(config.name, "变电站正常运行场景")
         self.assertEqual(len(config.devices), 17)
         self.assertEqual(len(config.links), 19)
 
