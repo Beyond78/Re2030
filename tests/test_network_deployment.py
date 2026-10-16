@@ -114,6 +114,14 @@ class TestNetworkDeployment(unittest.TestCase):
                 _, page, _ = server.handle_request("GET", "/")
                 self.assertLess(page["__raw__"].index('src="/topology-layout-editor.js'), page["__raw__"].index('src="/app.js'))
                 self.assertLess(page["__raw__"].index('src="/network-topology.js'), page["__raw__"].index('src="/app.js'))
+                status, admin, headers = server.handle_request("GET", "/admin")
+                self.assertEqual(status, 200)
+                self.assertIn("text/html", headers["Content-Type"])
+                self.assertIn("拓扑后台管理", admin["__raw__"])
+                self.assertIn('id="topology-edit-toggle"', admin["__raw__"])
+                self.assertIn('id="topology-property-panel"', admin["__raw__"])
+                self.assertNotIn('id="topology-edit-toggle"', page["__raw__"])
+                self.assertNotIn('id="topology-property-panel"', page["__raw__"])
             finally:
                 server.close()
 

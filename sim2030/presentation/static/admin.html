@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>拓扑后台管理 · 国家重点研发计划2030</title>
+  <link rel="stylesheet" href="/style.css?v=20261017-lines1">
+</head>
+<body class="topology-admin-page">
+  <!-- 顶部状态栏 -->
+  <header class="topbar">
+    <div class="topology-admin-badge" aria-label="拓扑后台管理">拓扑后台管理</div>
+    <div class="brand">
+      <div class="brand-logo">
+        <span class="shield-icon">⛨</span>
+      </div>
+      <div class="brand-text">
+        <h1>感控设备信号攻击监测与态势感知平台</h1>
+        <span class="sub-title">国家重点研发计划课题三 · 变电站感控系统仿真底座</span>
+      </div>
+    </div>
+
+    <!-- 顶部核心态势统计指标卡片 -->
+    <div class="metric-ribbon">
+      <div class="metric-card" id="m-status-card">
+        <div class="metric-label">运行状态</div>
+        <div class="metric-value status-tag" id="m-status">IDLE</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">仿真时间</div>
+        <div class="metric-value" id="m-time">0.000 s</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">受控设备 / 链路</div>
+        <div class="metric-value"><span id="m-devices">0</span> <span class="unit">/</span> <span id="m-links">0</span></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">观测事件</div>
+        <div class="metric-value text-cyan" id="m-obs-events">0</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">监测告警 (缺/迟)</div>
+        <div class="metric-value text-yellow"><span id="m-obs-missing">0</span> <span class="unit">/</span> <span id="m-obs-late">0</span></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">攻击威胁 / 处置</div>
+        <div class="metric-value"><span id="m-threats" class="text-danger">0</span> <span class="unit">/</span> <span id="m-defenses" class="text-success">0</span></div>
+      </div>
+    </div>
+
+    <div class="top-status-indicator">
+      <span class="pulse-dot" id="live-dot"></span>
+      <span id="status-bar" class="status-bar">就绪</span>
+    </div>
+  </header>
+
+  <!-- 主屏三栏布局 -->
+  <main class="layout">
+    <!-- 左侧：场景选择与控制中心 -->
+    <aside class="panel side-panel left-panel">
+      <div class="panel-header">
+        <span class="icon">▤</span>
+        <h2>场景列表</h2>
+      </div>
+
+      <div id="scenario-section-title" class="section-title">选择场景以编辑拓扑</div>
+      <ul id="scenario-list" class="scenario-list"></ul>
+      <button id="create-run" class="btn btn-primary btn-block" disabled hidden>加载并创建运行</button>
+      <div class="run-meta-box" hidden><code id="run-id" class="meta-code">-</code></div>
+
+      <!-- 推演控制已移到拓扑画布上的悬浮层（#playback-overlay），可拖拽、可收起 -->
+
+      <section id="cyber-demo-controls" class="cyber-demo-panel" aria-label="网络攻击演示" hidden></section>
+
+      <div class="section-title">设备控制面板</div>
+      <div id="device-control-panel" class="device-control-panel">
+        <div id="device-control-body">
+          <div class="device-control-empty">请在拓扑中点选设备</div>
+        </div>
+        <!-- 断路器智能终端：点选设备后在此展开接收队列配置与处理记录 -->
+        <section id="goose-receiver-panel" class="goose-receiver-panel device-control-card" aria-label="断路器智能终端接收详情" hidden>
+          <div class="panel-header"><h2>断路器智能终端</h2></div>
+          <form id="receiver-settings" class="receiver-settings">
+            <label for="receiver-capacity">队列容量（帧）</label>
+            <input id="receiver-capacity" type="number" min="1" max="4096" step="1" required>
+            <label for="receiver-rate">处理速率（帧/秒）</label>
+            <input id="receiver-rate" type="number" min="10" max="50000" step="1" required>
+            <label class="receiver-check"><input id="receiver-filter" type="checkbox">启用入口过滤</label>
+            <button type="submit" id="receiver-apply" class="btn btn-primary">应用接收配置</button>
+            <p id="receiver-config-notice" class="capture-muted" role="status"></p>
+            <small>GOOSE 与遥控命令共用此队列。过滤作用于新到达的 GOOSE；已有队列按原计划处理。</small>
+          </form>
+          <div id="receiver-live"></div>
+          <h3 class="receiver-list-title">处理记录</h3>
+          <div id="receiver-history" class="receiver-frame-list"></div>
+          <div class="capture-pagination"><button type="button" id="receiver-older" class="btn btn-secondary">较早记录</button><button type="button" id="receiver-latest" class="btn btn-secondary">最新记录</button></div>
+        </section>
+        <!-- 交换机：点选交换机后在此展开端口清单 -->
+        <section id="switch-control-panel" class="switch-control-panel device-control-card" aria-label="交换机端口" hidden></section>
+        <!-- 网络攻击节点：点选红色攻击节点后在此展开攻击报文下发 -->
+        <section id="attack-node-panel" class="attack-node-panel device-control-card" aria-label="网络攻击节点控制" hidden></section>
+      </div>
+
+      <div class="section-title">时刻历史快照回放</div>
+      <div class="replay-group">
+        <input id="replay-time" type="number" step="100000" placeholder="时刻 (μs)" value="0">
+        <button class="btn btn-secondary" id="seek-replay">快照</button>
+      </div>
+    </aside>
+
+    <!-- 中间：核心态势感知拓扑大屏与主视图区 -->
+    <section class="panel center-panel">
+      <div class="panel-header tab-header">
+        <div class="tabs">
+          <button class="tab active" data-view="system">态势拓扑</button>
+          <button class="tab" data-view="timeline">攻防时序</button>
+          <button class="tab" data-view="observations">观测数据</button>
+          <button class="tab" data-view="recognition">攻击识别</button>
+          <button class="tab" data-view="defense">防御处置</button>
+          <button class="tab" data-view="evaluation">效能评估</button>
+        </div>
+        <div class="view-actions">
+          <button type="button" id="topology-expand" class="legend-btn" aria-pressed="false">展开拓扑</button>
+          <button class="btn btn-icon" id="btn-refresh" title="即时刷新" style="padding: 6px 10px; font-size: 14px;">↻</button>
+        </div>
+      </div>
+
+      <!-- 拓扑主工作区容器 -->
+      <div id="topo-container" class="topo-container">
+      <!-- 拓扑图例：链路定义 / 节点状态 / 报文粒子 -->
+      <div class="topo-legend">
+        <div class="legend-row">
+          <div class="legend-group">
+            <span class="legend-group-title">链路定义</span>
+            <!-- 链路类型由当前场景实际存在的链路在脚本中生成 -->
+            <div class="legend-chips" id="legend-links"></div>
+          </div>
+        </div>
+        <div class="legend-row">
+          <div class="legend-group">
+            <span class="legend-group-title">节点状态</span>
+            <div class="legend-chips">
+              <span class="legend-item" title="设备正常稳态运行"><span class="legend-dot dot-normal"></span>正常</span>
+              <span class="legend-item" title="识别平面命中可疑特征/观测时窗异常"><span class="legend-dot dot-suspect"></span>疑似</span>
+              <span class="legend-item" title="受到攻击平面 EffectRequest 物理/通信致效作用"><span class="legend-dot dot-attacked"></span>受损</span>
+            </div>
+          </div>
+        </div>
+        <div class="legend-row">
+          <div class="legend-group">
+            <span class="legend-group-title">报文粒子</span>
+            <div class="legend-chips">
+              <span class="legend-item" title="采样值、设备状态、对时同步等数据类报文"><span class="particle-dot data"></span>数据</span>
+              <span class="legend-item" title="控制命令、保护动作及设备执行反馈"><span class="particle-dot command"></span>控制交互</span>
+              <span class="legend-item" title="未能归类或扩展类型"><span class="particle-dot other"></span>其他</span>
+              <span class="legend-item" id="legend-attack-particle" title="攻击进行时沿电磁干扰链路持续发送的影响信号"><span class="particle-dot attack"></span>影响信号</span>
+              <span class="legend-item" title="接收端未接受的到达帧（状态号回退、重复序列、过滤或队满），在线路上以橙色带环粒子持续出现"><span class="particle-dot rejected"></span>被拒报文</span>
+            </div>
+          </div>
+          <div class="legend-actions">
+            <select id="particle-filter" class="form-select particle-filter-select">
+              <option value="all" selected>全部报文</option>
+              <option value="data">数据分组</option>
+              <option value="command">控制交互分组</option>
+              <option value="rejected">被拒报文</option>
+              <option value="other">其他</option>
+            </select>
+          </div>
+        </div>
+        <div class="legend-row">
+          <div class="legend-group">
+            <span class="legend-group-title">实际工况（真值）</span>
+            <div class="legend-chips">
+              <span class="legend-item" title="一次侧实际电压真值，不受量测篡改影响">母线电压 <b id="m-actual-v">--</b> kV</span>
+              <span class="legend-item" title="一次侧实际电流真值，不受量测篡改影响">线路电流 <b id="m-actual-i">--</b> A</span>
+              <span class="legend-item" title="线路有功功率（由实际电压、电流换算）">有功功率 <b id="m-actual-p">--</b> MW</span>
+              <span class="legend-item" title="线路无功功率">无功功率 <b id="m-actual-q">--</b> Mvar</span>
+              <span class="legend-item" title="环境温度">环境温度 <b id="m-actual-t">--</b> ℃</span>
+            </div>
+          </div>
+        </div>
+      </div>
+        <!-- SVG 拓扑画布：可拖动平移，Ctrl+滚轮缩放 -->
+        <div class="topo-toolbar">
+        <div class="topo-zoom-controls">
+          <button type="button" id="zoom-in" class="legend-btn" aria-label="放大拓扑">＋</button>
+          <button type="button" id="zoom-out" class="legend-btn" aria-label="缩小拓扑">−</button>
+          <span id="topo-zoom-value" class="topo-zoom-value">自动适配</span>
+        </div>
+        <div class="topo-edit-controls" role="group" aria-label="拓扑布局编辑">
+          <button type="button" id="topology-edit-toggle" class="legend-btn" aria-pressed="false">编辑布局</button>
+          <button type="button" id="topology-undo" class="legend-btn" aria-label="撤销布局修改" title="撤销" disabled>↶</button>
+          <button type="button" id="topology-redo" class="legend-btn" aria-label="重做布局修改" title="重做" disabled>↷</button>
+          <button type="button" id="topology-layout-reset" class="legend-btn" title="恢复当前场景初始位置">恢复初始</button>
+          <button type="button" id="topology-layout-save" class="legend-btn" title="仅保存在此浏览器">本地保存</button>
+          <div class="topology-tool-separator" aria-hidden="true"></div>
+          <button type="button" id="topology-add-module" class="legend-btn" title="复制当前选中的场景设备、网络设备或已有副本">复制节点</button>
+          <button type="button" id="topology-link-toggle" class="legend-btn" aria-pressed="false" title="依次点击两个模块创建展示连线">＋连线</button>
+          <span id="topology-edit-status" role="status" aria-live="polite"></span>
+        </div>
+        <span class="topo-gesture-hint">拖动平移 · Ctrl + 滚轮缩放</span>
+        <button type="button" id="zoom-reset" class="legend-btn topo-reset-btn" title="恢复到自动铺满并居中">重置视图</button>
+        </div>
+        <div id="topology-property-panel" class="topology-property-panel" aria-label="拓扑对象属性">
+            <span class="topology-property-title">拓扑属性</span>
+          <span class="topology-selection-hint">选择设备后可复制；选中副本可修改名称。副本仅改变拓扑展示。</span>
+          <div id="topology-node-properties" class="topology-properties" hidden>
+            <span class="topology-property-type" id="topology-selected-type">节点</span>
+            <input id="topology-node-name" class="topology-node-name" type="text" maxlength="40" placeholder="节点名称" aria-label="节点名称" disabled>
+            <button type="button" id="topology-node-name-apply" class="legend-btn" title="应用副本名称">改名</button>
+          </div>
+          <div id="topology-link-properties" class="topology-properties">
+            <label class="topology-property-type" for="topology-link-type">关系类型</label>
+            <select id="topology-link-type" class="topology-module-type topology-link-type" aria-label="连线关系类型">
+              <option value="wired">有线通信</option><option value="station">站控网</option><option value="process">过程网</option>
+              <option value="mirror">流量镜像至 IDS</option><option value="management">监测管理上报</option>
+              <option value="measurement">传感器采集接线</option><option value="timing">专用对时</option>
+              <option value="wireless">无线链路</option><option value="interference">干扰/欺骗耦合</option>
+              <option value="attack-access">攻击节点接入</option><option value="hardwire">控制硬接线</option>
+              <option value="electrical">电气主回路</option><option value="physical">物理测量/热耦合</option>
+            </select>
+          </div>
+          <button type="button" id="topology-delete-selected" class="legend-btn topology-delete" title="删除选中的自定义模块或展示连线" disabled>删除</button>
+        </div>
+        <div id="topo-viewport" class="topo-viewport">
+        <svg id="topo-svg" class="topo-svg" viewBox="0 0 920 780" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <marker id="cyber-command-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#fb7185" />
+            </marker>
+            <marker id="cyber-observation-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#c4b5fd" />
+            </marker>
+            <marker id="monitor-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a78bfa" />
+            </marker>
+            <marker id="topology-custom-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" />
+            </marker>
+            <marker id="topology-custom-arrow-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" />
+            </marker>
+            <linearGradient id="grad-station" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#1e293b" />
+              <stop offset="100%" stop-color="#0f172a" />
+            </linearGradient>
+            <filter id="glow-danger" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ef4444" flood-opacity="0.8"/>
+            </filter>
+            <filter id="glow-warning" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#f59e0b" flood-opacity="0.7"/>
+            </filter>
+            <filter id="glow-selected" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#38bdf8" flood-opacity="0.9"/>
+            </filter>
+          </defs>
+
+          <!-- 背景分层标尺与区域背景 -->
+          <!-- 分层背景带由场景版式（layout.layers）在脚本中生成 -->
+          <g id="topo-regions" aria-hidden="true"></g>
+          <g id="topo-layers" class="topo-layers-bg"></g>
+
+          <!-- 拓扑连接线图层 -->
+          <g id="topo-links" class="topo-links-layer"></g>
+
+
+          <!-- 报文流粒子动画图层 -->
+          <g id="topo-packets" class="topo-packets-layer"></g>
+
+          <!-- 拓扑设备节点图层 -->
+          <g id="topo-cyber-demo" aria-label="网络攻击演示路径"></g>
+          <g id="topo-goose-path" aria-label="模拟终端接收路径"></g>
+          <g id="topo-nodes" class="topo-nodes-layer"></g>
+          <g id="topo-custom-nodes" class="topo-custom-nodes-layer"></g>
+          <!-- 交换机、镜像口与安全监测设备 -->
+          <g id="topo-network-assets"></g>
+          <g id="topo-custom-link-hits" class="topo-custom-link-hits-layer"></g>
+        </svg>
+        </div>
+      </div>
+
+      <!-- 推演控制悬浮层：半透明可拖拽，展开拓扑时仍可使用 -->
+      <div id="playback-overlay" class="playback-overlay" data-collapsed="0">
+        <div class="playback-handle" id="playback-handle" title="按住拖动调整位置">
+          <span class="playback-grip" aria-hidden="true"></span>
+          <span class="playback-title">推演控制</span>
+          <span class="playback-status" id="playback-status" role="status" aria-live="polite">未开始</span>
+          <button type="button" id="playback-overlay-toggle" class="playback-collapse" aria-expanded="true" aria-controls="playback-overlay-body" title="收起或展开">⌄</button>
+        </div>
+        <div id="playback-overlay-body" class="playback-body">
+          <div class="playback-actions">
+            <button class="pb-btn pb-primary" id="btn-run-toggle" aria-pressed="false" aria-label="开始推演" title="开始推演" disabled>▶ 开始</button>
+            <button class="pb-btn" id="btn-stop" data-action="stop" aria-label="停止推演" title="停止推演" disabled>■</button>
+            <button class="pb-btn" id="btn-single-step" aria-label="单步推进" title="单步推进" disabled>⏭</button>
+          </div>
+          <div class="playback-speeds" id="playback-speeds" role="group" aria-label="推演倍速">
+            <button type="button" class="pb-speed" data-rate="0.125" aria-pressed="true">0.125×</button>
+            <button type="button" class="pb-speed" data-rate="0.25" aria-pressed="false">0.25×</button>
+            <button type="button" class="pb-speed" data-rate="0.5" aria-pressed="false">0.5×</button>
+            <button type="button" class="pb-speed" data-rate="1" aria-pressed="false">1×</button>
+            <button type="button" class="pb-speed" data-rate="2" aria-pressed="false">2×</button>
+            <button type="button" class="pb-speed" data-rate="5" aria-pressed="false">5×</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 其它TAB视图的展示容器 -->
+      <div id="sub-view-container" class="sub-view-container" style="display:none;">
+        <div id="view-content" class="view-content"></div>
+      </div>
+    </section>
+
+    <!-- 右侧：常态监控详情与动态事件 -->
+    <aside class="panel side-panel right-panel">
+      <section id="goose-lab-result" class="goose-lab-result" aria-label="GOOSE 实验结果" hidden></section>
+      <section id="cyber-demo-detail" class="cyber-demo-detail" aria-label="攻击情景说明" hidden></section>
+      <section id="network-inspector" class="network-inspector" aria-label="网络安全监测">
+        <div class="panel-header"><h2>网络安全监测</h2><span class="network-mode">旁路 IDS</span></div>
+        <div id="network-inspector-body"><div class="monitor-empty">加载场景后查看采集点与接口</div></div>
+      </section>
+      <div class="panel-header">
+        <span class="icon">🖥</span>
+        <h2>监控交互流（实时）</h2>
+      </div>
+      <div id="monitor-panel" class="monitor-panel">
+        <div class="alert-empty">暂无监控交互数据，启动运行后自动刷新</div>
+      </div>
+
+      <div class="panel-header" style="margin-top: 14px;">
+        <span class="icon">🔔</span>
+        <h2>动态攻防/监测事件</h2>
+      </div>
+      <div id="alert-feed" class="alert-feed">
+        <div class="alert-empty">暂无告警记录</div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- 内部报文详情：仅展示 Message.to_record() 的真实字段 -->
+  <div id="packet-inspector" class="packet-inspector" aria-hidden="true">
+    <div class="packet-inspector-backdrop" data-packet-close="1"></div>
+    <section class="packet-inspector-panel" role="dialog" aria-modal="true" aria-labelledby="packet-inspector-title">
+      <header class="packet-inspector-header">
+        <div>
+          <div class="packet-inspector-kicker">运行期通信队列</div>
+          <h2 id="packet-inspector-title">内部报文（Message）</h2>
+        </div>
+        <button type="button" id="packet-inspector-close" class="packet-inspector-close" aria-label="关闭报文详情">×</button>
+      </header>
+      <div class="packet-inspector-notice">仅展示后端真实存在的 Message 字段，不代表原始 IEC 61850 / SV 线路帧。</div>
+      <div id="packet-inspector-body" class="packet-inspector-body"></div>
+      <footer class="packet-inspector-footer">
+        <span id="packet-inspector-copy-status" class="packet-inspector-copy-status" aria-live="polite"></span>
+        <button type="button" id="packet-inspector-copy" class="packet-inspector-copy">复制 JSON</button>
+      </footer>
+    </section>
+  </div>
+  <div id="packet-inspector-toast" class="packet-inspector-toast" role="status" aria-live="polite"></div>
+
+  <script src="/network-topology.js?v=20261017-lines1"></script>
+  <script src="/simulation-player.js?v=20261012-playback3"></script>
+  <script src="/topology-layout-editor.js?v=20261016-layout7"></script>
+  <script src="/app.js?v=20261017-lines1"></script>
+</body>
+</html>

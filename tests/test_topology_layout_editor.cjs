@@ -130,5 +130,90 @@ test('persists custom modules and links through undo, redo, and storage', () => 
   const restored = new TopologyLayoutEditor(storage);
   restored.configure('alpha', { a: { x: 1, y: 2 } }, { a: { width: 90, height: 48 } });
   assert.equal(restored.customModules[0].name, '传感器');
-  assert.deepEqual(restored.customLinks[0], { id: 'custom-link-a', source: 'custom-a', target: 'a' });
+  assert.deepEqual(restored.customLinks[0], {
+    id: 'custom-link-a', source: 'custom-a', target: 'a',
+    type: 'wired',
+  });
+});
+
+test('edits custom link relation type and keeps it undoable and persistent', () => {
+  const storage = memoryStorage();
+  const editor = new TopologyLayoutEditor(storage);
+  editor.configure('alpha', { a: { x: 1, y: 2 }, b: { x: 3, y: 4 } });
+  editor.customLinks.push({ id: 'custom-link-a', source: 'a', target: 'b', type: 'wired' });
+  editor.commitLayout(editor.snapshotLayout());
+  assert.equal(editor.updateCustomLink('custom-link-a', { type: 'hardwire' }), true);
+  assert.deepEqual(editor.customLinks[0], {
+    id: 'custom-link-a', source: 'a', target: 'b',
+    type: 'hardwire',
+  });
+  assert.equal(editor.undo(), true);
+  assert.equal(editor.customLinks[0].type, 'wired');
+  assert.equal(editor.redo(), true);
+  assert.equal(editor.save(), true);
+  const restored = new TopologyLayoutEditor(storage);
+  restored.configure('alpha', { a: { x: 1, y: 2 }, b: { x: 3, y: 4 } });
+  assert.equal(restored.customLinks[0].type, 'hardwire');
+});
+
+test('edits and deletes custom topology items with cascading links', () => {
+  const editor = new TopologyLayoutEditor(memoryStorage());
+  editor.configure('alpha', { a: { x: 1, y: 2 } });
+  editor.customModules.push({ id: 'custom-a', kind: 'sensor', name: '旧名称', x: 120, y: 80, width: 110, height: 58 });
+  editor.positions['custom-a'] = { x: 120, y: 80 };
+  editor.sizes['custom-a'] = { width: 110, height: 58 };
+  assert.equal(editor.updateCustomModule('custom-a', { name: '新名称', kind: 'ids' }), true);
+  assert.deepEqual(editor.customModules[0], { id: 'custom-a', kind: 'ids', name: '新名称', x: 120, y: 80, width: 110, height: 58 });
+  editor.customLinks.push({ id: 'custom-link-a', source: 'custom-a', target: 'a' });
+  const beforeDelete = editor.snapshotLayout();
+  assert.equal(editor.removeCustomModule('custom-a'), true);
+  assert.deepEqual(editor.customModules, []);
+  assert.deepEqual(editor.customLinks, []);
+  assert.equal(editor.undo(), true);
+  assert.deepEqual(editor.snapshotLayout(), beforeDelete);
+  assert.equal(editor.redo(), true);
+  assert.deepEqual(editor.customModules, []);
+});
+
+test('preserves copied node source, appearance, and renamed label through undo and storage', () => {
+  const storage = memoryStorage();
+  const editor = new TopologyLayoutEditor(storage);
+  editor.configure('alpha', { source: { x: 10, y: 20 } });
+  const before = editor.snapshotLayout();
+  editor.customModules.push({
+    id: 'copy-source', sourceId: 'source', sourceName: '原始攻击节点',
+    appearance: 'device-attack', kind: 'network_attack_source',
+    name: '攻击节点副本', x: 150, y: 20, width: 110, height: 58,
+  });
+  editor.positions['copy-source'] = { x: 150, y: 20 };
+  editor.sizes['copy-source'] = { width: 110, height: 58 };
+  editor.commitLayout(before);
+  assert.equal(editor.updateCustomModule('copy-source', { name: '演示攻击源' }), true);
+  assert.equal(editor.undo(), true);
+  assert.equal(editor.customModules[0].name, '攻击节点副本');
+  assert.equal(editor.redo(), true);
+  assert.equal(editor.customModules[0].name, '演示攻击源');
+  assert.equal(editor.save(), true);
+  const restored = new TopologyLayoutEditor(storage);
+  restored.configure('alpha', { source: { x: 10, y: 20 } });
+  assert.deepEqual(restored.customModules[0], {
+    id: 'copy-source', sourceId: 'source', sourceName: '原始攻击节点',
+    appearance: 'device-attack', kind: 'network_attack_source',
+    name: '演示攻击源', x: 150, y: 20, width: 110, height: 58,
+  });
+});
+
+test('persists native node display-name overrides and supports undo', () => {
+  const editor = new TopologyLayoutEditor(memoryStorage());
+  editor.configure('alpha', { a: { x: 1, y: 2 } });
+  assert.equal(editor.setNodeOverride('a', '保护装置'), true);
+  assert.deepEqual(editor.nodeOverrides, { a: { name: '保护装置' } });
+  assert.equal(editor.undo(), true);
+  assert.deepEqual(editor.nodeOverrides, {});
+  assert.equal(editor.redo(), true);
+  assert.deepEqual(editor.nodeOverrides, { a: { name: '保护装置' } });
+  assert.equal(editor.save(), true);
+  const restored = new TopologyLayoutEditor(editor.storage);
+  restored.configure('alpha', { a: { x: 1, y: 2 } });
+  assert.deepEqual(restored.nodeOverrides, { a: { name: '保护装置' } });
 });

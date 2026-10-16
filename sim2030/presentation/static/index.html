@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>国家重点研发计划2030 · 感控系统安全态势大屏</title>
-  <link rel="stylesheet" href="/style.css?v=20261016-layout1">
+  <link rel="stylesheet" href="/style.css?v=20261017-lines1">
 </head>
 <body>
   <!-- 顶部状态栏 -->
@@ -193,24 +193,7 @@
           <button type="button" id="zoom-out" class="legend-btn" aria-label="缩小拓扑">−</button>
           <span id="topo-zoom-value" class="topo-zoom-value">自动适配</span>
         </div>
-        <div class="topo-edit-controls" role="group" aria-label="拓扑布局编辑">
-          <button type="button" id="topology-edit-toggle" class="legend-btn" aria-pressed="false">编辑布局</button>
-          <button type="button" id="topology-undo" class="legend-btn" aria-label="撤销布局修改" title="撤销" disabled>↶</button>
-          <button type="button" id="topology-redo" class="legend-btn" aria-label="重做布局修改" title="重做" disabled>↷</button>
-          <button type="button" id="topology-layout-reset" class="legend-btn" title="恢复当前场景初始位置">恢复初始</button>
-          <button type="button" id="topology-layout-save" class="legend-btn" title="仅保存在此浏览器">本地保存</button>
-          <select id="topology-module-type" class="topology-module-type" aria-label="新增模块类型">
-            <option value="generic">自定义模块</option>
-            <option value="switch">过程网交换机</option>
-            <option value="ids">IDS</option>
-            <option value="sensor">传感器</option>
-            <option value="controller">控制接口</option>
-            <option value="attack">攻击节点</option>
-          </select>
-          <button type="button" id="topology-add-module" class="legend-btn" title="添加一个仅用于拓扑展示的模块">＋模块</button>
-          <button type="button" id="topology-link-toggle" class="legend-btn" aria-pressed="false" title="依次点击两个模块创建展示连线">连线</button>
-          <span id="topology-edit-status" role="status" aria-live="polite"></span>
-        </div>
+        <div class="topo-view-only-label">只读拓扑视图</div>
         <span class="topo-gesture-hint">拖动平移 · Ctrl + 滚轮缩放</span>
         <button type="button" id="zoom-reset" class="legend-btn topo-reset-btn" title="恢复到自动铺满并居中">重置视图</button>
         </div>
@@ -225,6 +208,12 @@
             </marker>
             <marker id="monitor-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#a78bfa" />
+            </marker>
+            <marker id="topology-custom-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" />
+            </marker>
+            <marker id="topology-custom-arrow-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" />
             </marker>
             <linearGradient id="grad-station" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="#1e293b" />
@@ -260,6 +249,7 @@
           <g id="topo-custom-nodes" class="topo-custom-nodes-layer"></g>
           <!-- 交换机、镜像口与安全监测设备 -->
           <g id="topo-network-assets"></g>
+          <g id="topo-custom-link-hits" class="topo-custom-link-hits-layer"></g>
         </svg>
         </div>
       </div>
@@ -342,9 +332,9 @@
   </div>
   <div id="packet-inspector-toast" class="packet-inspector-toast" role="status" aria-live="polite"></div>
 
-  <script src="/network-topology.js?v=20261013-attacknode"></script>
+  <script src="/network-topology.js?v=20261017-lines1"></script>
   <script src="/simulation-player.js?v=20261012-playback3"></script>
-  <script src="/topology-layout-editor.js?v=20261016-layout4"></script>
-  <script src="/app.js?v=20261016-layout4"></script>
+  <script src="/topology-layout-editor.js?v=20261016-layout7"></script>
+  <script src="/app.js?v=20261017-lines1"></script>
 </body>
 </html>

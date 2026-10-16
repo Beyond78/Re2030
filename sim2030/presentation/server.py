@@ -95,6 +95,8 @@ class PresentationServer:
         try:
             if route == "/" or route == "/index.html":
                 return self._static("index.html")
+            if route in ("/admin", "/admin.html"):
+                return self._static("admin.html")
             if route in ("/app.js", "/static/app.js"):
                 return self._static("app.js")
             if route in ("/network-topology.js", "/static/network-topology.js"):

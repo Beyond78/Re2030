@@ -13,6 +13,10 @@ test('two isolated switches, two mirror feeds and independent reporting cables',
   assert.equal(model.cables.filter(c => c.kind === 'management').length, 2);
   assert.equal(model.cables.filter(c => c.kind === 'station').length, 3);
   assert.equal(model.cables.filter(c => c.kind === 'process').length, 6);
+  assert.equal(model.cables.some(c => c.display_group === 'business'), false,
+    'business routes must not be drawn a second time over switch access cables');
+  assert.equal(model.cables.some(c => c.display_group === 'network-backbone'), false,
+    'network access must not be duplicated by an aggregate bus');
   assert.equal(model.routes.size, scene.links.length);
   assert.equal(model.cables.some(c => /gateway|bus/.test(c.id)), false);
   const rightEdge = Math.max(...scene.layout.layers.map(layer => layer.x + layer.width));
