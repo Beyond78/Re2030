@@ -101,6 +101,8 @@ class PresentationServer:
                 return self._static("network-topology.js")
             if route in ("/simulation-player.js", "/static/simulation-player.js"):
                 return self._static("simulation-player.js")
+            if route in ("/topology-layout-editor.js", "/static/topology-layout-editor.js"):
+                return self._static("topology-layout-editor.js")
             if route in ("/style.css", "/static/style.css"):
                 return self._static("style.css")
 

@@ -4,6 +4,8 @@
 const state = {
   scenarios: [],
   selectedScenario: null,
+  activeScenarioId: null,
+  topologyEditing: false,
   runId: null,
   currentView: "system",
   systemData: null,
@@ -33,6 +35,7 @@ const state = {
 
 const $ = (selector) => document.querySelector(selector);
 const cyberDemo = new CyberDemo();
+const topologyLayoutEditor = new TopologyLayoutEditor();
 let cyberDemoAnimationStart = 0;
 let cyberDemoPaths = [];
 
@@ -283,6 +286,7 @@ function renderPlaybackControls() {
     status.dataset.state = state_;
     status.textContent = labels[state_];
   }
+  updateTopologyEditorControls();
 }
 
 /* 换场景前停止调度，等待在途步骤和暂停确认。 */
@@ -302,6 +306,8 @@ async function createRun() {
     if (payload.error) { setStatus(payload.error, true); return; }
     createdRunId = payload.run_id;
     state.runId = payload.run_id;
+    state.activeScenarioId = scenarioId;
+    state.topologyEditing = false;
     simulationPlayer.bind(payload.run_id, payload);
     state.renderedTopologyOnce = false;
     $("#run-id").textContent = payload.run_id;
@@ -324,6 +330,7 @@ async function createRun() {
 
 async function control(action) {
   if (state.loadingRun) return false;
+  if (action === "start" && state.topologyEditing) setTopologyEditing(false);
   const actualAction = action === "step" ? "step_once" : action;
   const accepted = await simulationPlayer.command(actualAction);
   if (accepted) {
@@ -1371,8 +1378,65 @@ function setupTopoInteraction() {
   }).observe(viewport);
 
   let drag = null;
+  let nodeDrag = null;
+  const svg = $("#topo-svg");
+  const toCanvasPoint = (event) => {
+    const matrix = svg.getScreenCTM();
+    if (!matrix) return null;
+    const point = svg.createSVGPoint();
+    point.x = event.clientX;
+    point.y = event.clientY;
+    const local = point.matrixTransform(matrix.inverse());
+    return { x: local.x, y: local.y };
+  };
+
+  svg.addEventListener("pointerdown", (event) => {
+    const node = event.target.closest(".topo-node");
+    if (!state.topologyEditing || !node || event.button !== 0) return;
+    const id = node.dataset.deviceId;
+    const position = topologyLayoutEditor.get(id);
+    const point = toCanvasPoint(event);
+    if (!position || !point) return;
+    nodeDrag = { id, node, before: topologyLayoutEditor.snapshot(), offsetX: point.x - position.x, offsetY: point.y - position.y, startX: point.x, startY: point.y, moved: false };
+    node.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+  });
+
+  window.addEventListener("pointermove", (event) => {
+    if (!nodeDrag) return;
+    const point = toCanvasPoint(event);
+    if (!point) return;
+    const x = Math.round(point.x - nodeDrag.offsetX);
+    const y = Math.round(point.y - nodeDrag.offsetY);
+    if (!nodeDrag.moved && (Math.abs(point.x - nodeDrag.startX) > 2 || Math.abs(point.y - nodeDrag.startY) > 2)) {
+      nodeDrag.moved = true;
+      state.dragMoved = true;
+    }
+    if (!nodeDrag.moved) return;
+    const current = topologyLayoutEditor.get(nodeDrag.id);
+    if (!current || (current.x === x && current.y === y)) return;
+    topologyLayoutEditor.positions[nodeDrag.id] = { x, y };
+    NODE_COORDINATES[nodeDrag.id] = { x, y };
+    nodeDrag.node.setAttribute("transform", `translate(${x}, ${y})`);
+    refreshEditedTopology();
+  });
+
+  window.addEventListener("pointerup", () => {
+    if (!nodeDrag) return;
+    if (nodeDrag.moved) {
+      topologyLayoutEditor.commitMove(nodeDrag.id, NODE_COORDINATES[nodeDrag.id], nodeDrag.before);
+      setTimeout(() => { state.dragMoved = false; }, 0);
+      updateTopologyEditorControls();
+    } else {
+      state.dragMoved = false;
+    }
+    nodeDrag = null;
+  });
+
   viewport.addEventListener("mousedown", (event) => {
     if (event.button !== 0) return;
+    if (state.topologyEditing && event.target.closest(".topo-node")) return;
     if (event.target.closest("#zoom-reset, .topo-zoom-controls, .goose-attack-packet")) return;
     drag = { x: event.clientX, y: event.clientY, panX: state.pan.x, panY: state.pan.y, moved: false };
     viewport.classList.add("dragging");
@@ -1442,6 +1506,81 @@ function resetTopoView() {
   fitTopoToViewport();
 }
 
+function updateTopologyEditorControls() {
+  const toggle = $("#topology-edit-toggle");
+  if (!toggle) return;
+  const locked = simulationPlayer.running || simulationPlayer.busy || state.loadingRun;
+  toggle.setAttribute("aria-pressed", String(state.topologyEditing));
+  toggle.textContent = state.topologyEditing ? "退出编辑" : "编辑布局";
+  toggle.disabled = (!state.systemData?.topology || locked) && !state.topologyEditing;
+  $("#topology-undo").disabled = !state.systemData?.topology || !topologyLayoutEditor.canUndo;
+  $("#topology-redo").disabled = !state.systemData?.topology || !topologyLayoutEditor.canRedo;
+  $("#topology-layout-reset").disabled = !state.systemData?.topology;
+  $("#topology-layout-save").disabled = !state.systemData?.topology;
+  const status = $("#topology-edit-status");
+  if (status) status.textContent = state.topologyEditing ? "编辑中 · 拖动节点" : "";
+  $("#topo-viewport")?.classList.toggle("topology-editing", state.topologyEditing);
+}
+
+function setTopologyEditing(enabled) {
+  if (enabled && (simulationPlayer.running || simulationPlayer.busy || state.loadingRun)) return;
+  state.topologyEditing = Boolean(enabled);
+  updateTopologyEditorControls();
+}
+
+function refreshEditedTopology() {
+  const topo = state.systemData?.topology;
+  if (!topo) return;
+  const effective = topologyWithEditedLayout(topo);
+  state.networkModel = NetworkTopology.build(effective, NODE_COORDINATES);
+  renderTopologyLinks();
+  renderNetworkRegions(state.networkModel, resolveLayerBands(effective.layout || {}, effective.devices || []));
+  renderNetworkAssets(state.systemData);
+  applyCanvasSize(effective.layout || {}, resolveLayerBands(effective.layout || {}, effective.devices || []));
+  updateTopologyEditorControls();
+}
+
+function topologyWithEditedLayout(topo) {
+  const initial = topologyLayoutEditor.initial;
+  const directLinks = { ...(topo.layout?.deployment?.direct_links || {}) };
+  (topo.links || []).forEach((link) => {
+    const direct = directLinks[link.link_id];
+    if (!direct?.points?.length) return;
+    const startDelta = coordinateDelta(initial[link.endpoint_a?.[0]], NODE_COORDINATES[link.endpoint_a?.[0]]);
+    const endDelta = coordinateDelta(initial[link.endpoint_b?.[0]], NODE_COORDINATES[link.endpoint_b?.[0]]);
+    directLinks[link.link_id] = { ...direct, points: moveRouteEndpoints(direct.points, startDelta, endDelta) };
+  });
+  return { ...topo, layout: { ...topo.layout, deployment: topo.layout?.deployment
+    ? { ...topo.layout.deployment, direct_links: directLinks } : topo.layout?.deployment } };
+}
+
+function coordinateDelta(from, to) {
+  return from && to ? { x: to.x - from.x, y: to.y - from.y } : { x: 0, y: 0 };
+}
+
+function moveRouteEndpoints(points, startDelta, endDelta) {
+  const moved = points.map((point) => ({ ...point }));
+  const shift = (point, delta) => ({ x: point.x + delta.x, y: point.y + delta.y });
+  moved[0] = shift(moved[0], startDelta);
+  if (moved.length > 1) {
+    const first = points[0], second = points[1];
+    if (first.x === second.x) moved[1].x += startDelta.x;
+    if (first.y === second.y) moved[1].y += startDelta.y;
+    const last = points.length - 1, before = points[last - 1];
+    moved[last] = shift(moved[last], endDelta);
+    if (points[last].x === before.x) moved[last - 1].x += endDelta.x;
+    if (points[last].y === before.y) moved[last - 1].y += endDelta.y;
+  }
+  return moved;
+}
+
+function applyTopologyEditorHistory(action) {
+  if (!topologyLayoutEditor[action]()) return;
+  Object.assign(NODE_COORDINATES, topologyLayoutEditor.snapshot());
+  refreshEditedTopology();
+  syncTopologyPositions();
+}
+
 /* 图例只展示当前场景实际存在的链路类型；“影响信号”仅在有电磁干扰链路时出现 */
 function renderLinkLegend(links) {
   const box = $("#legend-links");
@@ -1472,6 +1611,9 @@ function applyScenarioLayout(topo) {
 
   Object.keys(NODE_COORDINATES).forEach((key) => delete NODE_COORDINATES[key]);
   Object.assign(NODE_COORDINATES, resolveNodeCoordinates(devices, layout));
+  const scenarioId = state.activeScenarioId || topo.scenario_id || state.selectedScenario || "unknown";
+  topologyLayoutEditor.configure(scenarioId, NODE_COORDINATES);
+  Object.assign(NODE_COORDINATES, topologyLayoutEditor.snapshot());
 
   const bands = resolveLayerBands(layout, devices);
   state.networkModel = NetworkTopology.build(topo, NODE_COORDINATES);
@@ -2698,6 +2840,22 @@ function renderOtherView(view, data) {
 }
 function bindEvents() {
   setupTopoInteraction();
+  $("#topology-edit-toggle")?.addEventListener("click", () => setTopologyEditing(!state.topologyEditing));
+  $("#topology-undo")?.addEventListener("click", () => applyTopologyEditorHistory("undo"));
+  $("#topology-redo")?.addEventListener("click", () => applyTopologyEditorHistory("redo"));
+  $("#topology-layout-reset")?.addEventListener("click", () => {
+    if (!topologyLayoutEditor.reset()) return;
+    Object.assign(NODE_COORDINATES, topologyLayoutEditor.snapshot());
+    refreshEditedTopology();
+    syncTopologyPositions();
+    setStatus("已恢复当前场景的初始布局");
+  });
+  $("#topology-layout-save")?.addEventListener("click", () => {
+    const saved = topologyLayoutEditor.save();
+    const status = $("#topology-edit-status");
+    if (status) status.textContent = saved ? "已保存在此浏览器" : "本地保存失败";
+    setStatus(saved ? "布局已保存在此浏览器，不会修改场景文件" : "浏览器不允许本地存储，布局未保存", !saved);
+  });
   const zoomReset = $("#zoom-reset");
   if (zoomReset) zoomReset.addEventListener("click", resetTopoView);
 

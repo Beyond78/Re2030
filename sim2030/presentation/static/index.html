@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>国家重点研发计划2030 · 感控系统安全态势大屏</title>
-  <link rel="stylesheet" href="/style.css?v=20261013-attacknode">
+  <link rel="stylesheet" href="/style.css?v=20261016-layout1">
 </head>
 <body>
   <!-- 顶部状态栏 -->
@@ -193,6 +193,14 @@
           <button type="button" id="zoom-out" class="legend-btn" aria-label="缩小拓扑">−</button>
           <span id="topo-zoom-value" class="topo-zoom-value">自动适配</span>
         </div>
+        <div class="topo-edit-controls" role="group" aria-label="拓扑布局编辑">
+          <button type="button" id="topology-edit-toggle" class="legend-btn" aria-pressed="false">编辑布局</button>
+          <button type="button" id="topology-undo" class="legend-btn" aria-label="撤销布局修改" title="撤销" disabled>↶</button>
+          <button type="button" id="topology-redo" class="legend-btn" aria-label="重做布局修改" title="重做" disabled>↷</button>
+          <button type="button" id="topology-layout-reset" class="legend-btn" title="恢复当前场景初始位置">恢复初始</button>
+          <button type="button" id="topology-layout-save" class="legend-btn" title="仅保存在此浏览器">本地保存</button>
+          <span id="topology-edit-status" role="status" aria-live="polite"></span>
+        </div>
         <span class="topo-gesture-hint">拖动平移 · Ctrl + 滚轮缩放</span>
         <button type="button" id="zoom-reset" class="legend-btn topo-reset-btn" title="恢复到自动铺满并居中">重置视图</button>
         </div>
@@ -325,6 +333,7 @@
 
   <script src="/network-topology.js?v=20261013-attacknode"></script>
   <script src="/simulation-player.js?v=20261012-playback3"></script>
-  <script src="/app.js?v=20261013-attacknode"></script>
+  <script src="/topology-layout-editor.js?v=20261016-layout1"></script>
+  <script src="/app.js?v=20261016-layout1"></script>
 </body>
 </html>

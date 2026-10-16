@@ -107,7 +107,12 @@ class TestNetworkDeployment(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertIn("application/javascript", headers["Content-Type"])
                 self.assertIn("const NetworkTopology", payload["__raw__"])
+                status, editor, headers = server.handle_request("GET", "/topology-layout-editor.js")
+                self.assertEqual(status, 200)
+                self.assertIn("application/javascript", headers["Content-Type"])
+                self.assertIn("class TopologyLayoutEditor", editor["__raw__"])
                 _, page, _ = server.handle_request("GET", "/")
+                self.assertLess(page["__raw__"].index('src="/topology-layout-editor.js'), page["__raw__"].index('src="/app.js'))
                 self.assertLess(page["__raw__"].index('src="/network-topology.js'), page["__raw__"].index('src="/app.js'))
             finally:
                 server.close()
