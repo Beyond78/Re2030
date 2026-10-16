@@ -19,6 +19,16 @@
 .legend-line.line-measurement { border-top: 2px solid #94a3b8; }
 .legend-line.line-timing { border-top: 2px dashed #fbbf24; }
 .network-asset { cursor: pointer; outline: none; }
+.topo-viewport.topology-editing .network-asset,
+.topo-viewport.topology-editing .topo-node { cursor: grab; }
+.topo-viewport.topology-editing .network-asset:active,
+.topo-viewport.topology-editing .topo-node:active { cursor: grabbing; }
+.topo-viewport.topology-editing .layer-band-editor { cursor: default; }
+.topo-viewport.topology-editing .layer-band-editor .layer-resize-handle { cursor: nwse-resize; }
+.topo-resize-handle { fill: transparent; stroke: rgba(148, 163, 184, .85); stroke-width: 2; opacity: 0; pointer-events: none; }
+.topo-resize-hit { fill: none; stroke: transparent; stroke-width: 18; opacity: 0; pointer-events: none; }
+.topology-editing .topo-resize-handle { opacity: .85; cursor: nwse-resize; }
+.topology-editing .topo-resize-hit { pointer-events: stroke; cursor: nwse-resize; }
 .network-asset rect { fill: #112438; stroke: #49718b; stroke-width: 1.5; }
 .network-asset.probe rect, .network-asset.manager rect { fill: #1b1c34; stroke: #8374b7; }
 .network-asset.selected rect, .network-asset:focus-visible rect { stroke: #e2e8f0; stroke-width: 2.5; }

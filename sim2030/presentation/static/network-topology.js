@@ -3,7 +3,7 @@
 
 const NetworkTopology = (() => {
   const endpointId = (endpoint) => Array.isArray(endpoint) ? endpoint[0] : endpoint;
-  const center = (p) => ({ x: p.x + 45, y: p.y + 24 });
+  const center = (p, size = { width: 90, height: 48 }) => ({ x: p.x + size.width / 2, y: p.y + size.height / 2 });
   const pathData = (points) => points.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
 
   function pointAt(points, progress) {
@@ -21,7 +21,7 @@ const NetworkTopology = (() => {
     return points[points.length - 1];
   }
 
-  function build(topology, coordinates) {
+  function build(topology, coordinates, sizes = {}) {
     const deployment = topology.layout?.deployment;
     const networks = deployment?.networks || [];
     const routes = new Map();
@@ -33,14 +33,16 @@ const NetworkTopology = (() => {
     const linkMap = new Map(links.map(link => [link.link_id, link]));
 
     for (const network of networks) {
-      const sw = { ...network.switch, kind: "switch", network_id: network.id };
-      const probe = { ...network.probe, kind: "probe", network_id: network.id };
+      const geometry = (asset) => ({ ...asset, ...(coordinates[asset.id] || {}), ...(sizes[asset.id] || {}) });
+      const sw = { ...geometry(network.switch), kind: "switch", network_id: network.id };
+      const probe = { ...geometry(network.probe), kind: "probe", network_id: network.id };
       assets.push(sw, probe);
       const access = new Map();
       network.connections.forEach((connection, index) => {
         const coord = coordinates[connection.device_id];
         if (!coord) return;
-        const anchor = { x: coord.x + connection.anchor_x, y: coord.y + connection.anchor_y };
+        const size = sizes[connection.device_id] || { width: 90, height: 48 };
+        const anchor = { x: coord.x + connection.anchor_x / 90 * size.width, y: coord.y + connection.anchor_y / 48 * size.height };
         const port = { x: sw.x, y: sw.y + 14 + index * 12 };
         const points = [anchor, { x: anchor.x, y: port.y }, port];
         access.set(connection.device_id, points);
@@ -70,7 +72,7 @@ const NetworkTopology = (() => {
     }
 
     if (deployment?.manager) {
-      const manager = { ...deployment.manager, kind: "manager" };
+      const manager = { ...deployment.manager, ...(coordinates[deployment.manager.id] || {}), ...(sizes[deployment.manager.id] || {}), kind: "manager" };
       assets.push(manager);
       networks.forEach((network, index) => {
         const probe = network.probe;
@@ -90,7 +92,7 @@ const NetworkTopology = (() => {
       const b = coordinates[endpointId(link.endpoint_b)];
       if (!a || !b) continue;
       const direct = deployment?.direct_links?.[link.link_id];
-      const points = direct?.points || [center(a), center(b)];
+      const points = direct?.points || [center(a, sizes[endpointId(link.endpoint_a)]), center(b, sizes[endpointId(link.endpoint_b)])];
       const kind = direct?.role || link.link_type || "wired";
       routes.set(link.link_id, { points, link, network_id: null });
       cables.push({ id: link.link_id, kind, points,
@@ -107,7 +109,8 @@ const NetworkTopology = (() => {
       if (target) {
         const sw = target.switch;
         // 攻击节点排在交换机正下方：接线从节点顶边垂直上联到交换机底边。
-        const x = origin.x + 45;
+        const originSize = sizes[originId] || { width: 90 };
+        const x = origin.x + originSize.width / 2;
         const points = [{ x, y: origin.y }, { x, y: sw.y + sw.height }];
         cables.push({ id: `${target.id}:attack`, kind: "attack-access", points,
           title: `${originId} ↔ ${sw.name}（场景假定攻击者已接入过程网，注入攻击报文）` });

@@ -6,15 +6,24 @@ class TopologyLayoutEditor {
     this.scenarioId = null;
     this.initial = {};
     this.positions = {};
+    this.initialSizes = {};
+    this.sizes = {};
+    this.initialLayerSizes = {};
+    this.layerSizes = {};
     this.undoStack = [];
     this.redoStack = [];
   }
 
-  configure(scenarioId, positions) {
+  configure(scenarioId, positions, sizes = {}, layerSizes = {}) {
     if (scenarioId === this.scenarioId) return false;
     this.scenarioId = scenarioId || "unknown";
     this.initial = this.copy(positions);
-    this.positions = this.load() || this.copy(positions);
+    this.initialSizes = this.copy(sizes);
+    this.initialLayerSizes = this.copy(layerSizes);
+    const saved = this.load();
+    this.positions = saved?.positions || this.copy(positions);
+    this.sizes = saved?.sizes || this.copy(sizes);
+    this.layerSizes = saved?.layerSizes || this.copy(layerSizes);
     this.undoStack = [];
     this.redoStack = [];
     return true;
@@ -28,10 +37,19 @@ class TopologyLayoutEditor {
     return this.copy(this.positions);
   }
 
+  snapshotLayout() {
+    return { positions: this.copy(this.positions), sizes: this.copy(this.sizes), layerSizes: this.copy(this.layerSizes) };
+  }
+
+  getSize(id) {
+    const size = this.sizes[id] || this.layerSizes[id];
+    return size ? { ...size } : null;
+  }
+
   move(id, position) {
     if (!this.positions[id] || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return false;
     if (this.positions[id].x === position.x && this.positions[id].y === position.y) return false;
-    this.undoStack.push(this.copy(this.positions));
+    this.undoStack.push(this.snapshotLayout());
     this.positions[id] = { x: Math.round(position.x), y: Math.round(position.y) };
     this.redoStack = [];
     return true;
@@ -39,32 +57,51 @@ class TopologyLayoutEditor {
 
   commitMove(id, position, previous) {
     if (!this.positions[id] || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return false;
-    const before = this.copy(previous);
-    if (JSON.stringify(before) === JSON.stringify(this.positions)) return false;
+    this.positions[id] = { x: Math.round(position.x), y: Math.round(position.y) };
+    return this.commitLayout({ positions: this.copy(previous), sizes: this.copy(this.sizes) });
+  }
+
+  commitResize(id, size, previous) {
+    if (!size || !Number.isFinite(size.width) || !Number.isFinite(size.height)) return false;
+    if (this.positions[id]) this.sizes[id] = { width: Math.round(size.width), height: Math.round(size.height) };
+    else if (this.layerSizes[id]) this.layerSizes[id] = { width: Math.round(size.width), height: Math.round(size.height) };
+    else return false;
+    return this.commitLayout(previous);
+  }
+
+  commitLayout(previous) {
+    const before = {
+      positions: this.copy(previous?.positions || previous),
+      sizes: this.copy(previous?.sizes || this.sizes),
+      layerSizes: this.copy(previous?.layerSizes || this.layerSizes),
+    };
+    const current = this.snapshotLayout();
+    if (JSON.stringify(before) === JSON.stringify(current)) return false;
     this.undoStack.push(before);
     this.redoStack = [];
-    this.positions[id] = { x: Math.round(position.x), y: Math.round(position.y) };
     return true;
   }
 
   undo() {
     if (!this.undoStack.length) return false;
-    this.redoStack.push(this.copy(this.positions));
-    this.positions = this.undoStack.pop();
+    this.redoStack.push(this.snapshotLayout());
+    this.restore(this.undoStack.pop());
     return true;
   }
 
   redo() {
     if (!this.redoStack.length) return false;
-    this.undoStack.push(this.copy(this.positions));
-    this.positions = this.redoStack.pop();
+    this.undoStack.push(this.snapshotLayout());
+    this.restore(this.redoStack.pop());
     return true;
   }
 
   reset() {
-    if (JSON.stringify(this.positions) === JSON.stringify(this.initial)) return false;
-    this.undoStack.push(this.copy(this.positions));
+    if (JSON.stringify(this.snapshotLayout()) === JSON.stringify({ positions: this.initial, sizes: this.initialSizes, layerSizes: this.initialLayerSizes })) return false;
+    this.undoStack.push(this.snapshotLayout());
     this.positions = this.copy(this.initial);
+    this.sizes = this.copy(this.initialSizes);
+    this.layerSizes = this.copy(this.initialLayerSizes);
     this.redoStack = [];
     try { this.storage?.removeItem(this.storageKey()); } catch (_) { /* storage can be unavailable */ }
     return true;
@@ -72,7 +109,7 @@ class TopologyLayoutEditor {
 
   save() {
     try {
-      this.storage?.setItem(this.storageKey(), JSON.stringify(this.positions));
+      this.storage?.setItem(this.storageKey(), JSON.stringify(this.snapshotLayout()));
       return true;
     } catch (_) {
       return false;
@@ -88,16 +125,33 @@ class TopologyLayoutEditor {
     try {
       const parsed = JSON.parse(this.storage?.getItem(this.storageKey()) || "null");
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-      return Object.fromEntries(Object.entries(this.initial)
-        .map(([id, position]) => [id, parsed[id] && Number.isFinite(parsed[id].x) && Number.isFinite(parsed[id].y)
-          ? { x: parsed[id].x, y: parsed[id].y } : position]));
+      const storedPositions = parsed.positions && typeof parsed.positions === "object" ? parsed.positions : parsed;
+      const storedSizes = parsed.sizes && typeof parsed.sizes === "object" ? parsed.sizes : {};
+      const storedLayerSizes = parsed.layerSizes && typeof parsed.layerSizes === "object" ? parsed.layerSizes : {};
+      return {
+        positions: Object.fromEntries(Object.entries(this.initial)
+          .map(([id, position]) => [id, storedPositions[id] && Number.isFinite(storedPositions[id].x) && Number.isFinite(storedPositions[id].y)
+            ? { x: storedPositions[id].x, y: storedPositions[id].y } : position])),
+        sizes: Object.fromEntries(Object.entries(this.initialSizes)
+          .map(([id, size]) => [id, storedSizes[id] && Number.isFinite(storedSizes[id].width) && Number.isFinite(storedSizes[id].height)
+            ? { width: storedSizes[id].width, height: storedSizes[id].height } : size])),
+        layerSizes: Object.fromEntries(Object.entries(this.initialLayerSizes)
+          .map(([id, size]) => [id, storedLayerSizes[id] && Number.isFinite(storedLayerSizes[id].width) && Number.isFinite(storedLayerSizes[id].height)
+            ? { width: storedLayerSizes[id].width, height: storedLayerSizes[id].height } : size])),
+      };
     } catch (_) {
       return null;
     }
   }
 
+  restore(layout) {
+    this.positions = this.copy(layout?.positions);
+    this.sizes = this.copy(layout?.sizes);
+    this.layerSizes = this.copy(layout?.layerSizes);
+  }
+
   copy(value) {
-    return Object.fromEntries(Object.entries(value || {}).map(([id, position]) => [id, { x: position.x, y: position.y }]));
+    return Object.fromEntries(Object.entries(value || {}).map(([id, value]) => [id, { ...value }]));
   }
 }
 

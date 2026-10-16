@@ -1148,6 +1148,10 @@ function updateAlertFeed(data) {
    场景未声明时按设备所在层自动推导，保证新增场景无需改前端即可显示。 */
 const NODE_COORDINATES = {};           // 运行期由 applyScenarioLayout 填充
 const NODE_SIZE = { w: 90, h: 48 };
+const NODE_SIZES = {};                 // 运行期由 applyScenarioLayout 填充，编辑器保存宽高
+const LAYER_SIZES = {};                // 过程层等背景带的可编辑宽高
+let CURRENT_LAYER_BANDS = [];
+let editRefreshFrame = 0;
 const LAYER_ORDER = ["external", "station", "bay", "process"];
 const LAYER_TITLES = {
   external: "外界层 (EXTERNAL LAYER)",
@@ -1201,6 +1205,29 @@ function resolveNodeCoordinates(devices, layout) {
   return coords;
 }
 
+function resolveTopologyGeometry(topo, coordinates, sizes) {
+  const deployment = topo.layout?.deployment || {};
+  const assets = [];
+  (deployment.networks || []).forEach((network) => assets.push(network.switch, network.probe));
+  if (deployment.manager) assets.push(deployment.manager);
+  assets.filter(Boolean).forEach((asset) => {
+    if (!coordinates[asset.id] && Number.isFinite(asset.x) && Number.isFinite(asset.y)) {
+      coordinates[asset.id] = { x: asset.x, y: asset.y };
+    }
+    if (!sizes[asset.id] && Number.isFinite(asset.width) && Number.isFinite(asset.height)) {
+      sizes[asset.id] = { width: asset.width, height: asset.height };
+    }
+  });
+  (topo.devices || []).forEach((device) => {
+    if (!sizes[device.device_id]) {
+      sizes[device.device_id] = {
+        width: Number(device.layout?.width) || NODE_SIZE.w,
+        height: Number(device.layout?.height) || NODE_SIZE.h,
+      };
+    }
+  });
+}
+
 /* 解析分区带：场景声明优先，否则按各层设备的外接矩形自动推导 */
 function resolveLayerBands(layout, devices) {
   const declared = Array.isArray(layout.layers) ? layout.layers : null;
@@ -1217,8 +1244,9 @@ function resolveLayerBands(layout, devices) {
     const group = groups.get(key);
     group.minX = Math.min(group.minX, coord.x);
     group.minY = Math.min(group.minY, coord.y);
-    group.maxX = Math.max(group.maxX, coord.x + NODE_SIZE.w);
-    group.maxY = Math.max(group.maxY, coord.y + NODE_SIZE.h);
+      const size = NODE_SIZES[dev.device_id] || { width: NODE_SIZE.w, height: NODE_SIZE.h };
+      group.maxX = Math.max(group.maxX, coord.x + size.width);
+      group.maxY = Math.max(group.maxY, coord.y + size.height);
   });
 
   const order = LAYER_ORDER.concat([...groups.keys()].filter((key) => !LAYER_ORDER.includes(key)));
@@ -1239,9 +1267,13 @@ function resolveLayerBands(layout, devices) {
 function renderLayerBands(bands) {
   const group = $("#topo-layers");
   if (!group) return;
+  CURRENT_LAYER_BANDS = bands.map((band) => ({ ...band, width: Number(band.width), height: Number(band.height) }));
   group.innerHTML = "";
   const frag = document.createDocumentFragment();
-  bands.forEach((band) => {
+  CURRENT_LAYER_BANDS.forEach((band) => {
+    const editor = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    editor.setAttribute("class", "layer-band-editor");
+    editor.dataset.layoutId = `layer:${band.key}`;
     const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
     rect.setAttribute("x", band.x);
     rect.setAttribute("y", band.y);
@@ -1249,16 +1281,59 @@ function renderLayerBands(bands) {
     rect.setAttribute("height", band.height);
     rect.setAttribute("rx", "8");
     rect.setAttribute("class", `layer-band band-${band.key}`);
-    frag.appendChild(rect);
+    editor.appendChild(rect);
 
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
     text.setAttribute("x", Number(band.x) + 15);
     text.setAttribute("y", Number(band.y) + 23);
     text.setAttribute("class", "layer-title");
     text.textContent = band.title || band.key;
-    frag.appendChild(text);
+    editor.appendChild(text);
+    const handle = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    handle.setAttribute("class", "topo-resize-handle layer-resize-handle");
+    handle.setAttribute("d", `M${Number(band.x) + Number(band.width) - 14},${Number(band.y) + Number(band.height) - 5} l9,0 l0,-9`);
+    editor.appendChild(handle);
+    const hit = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    hit.setAttribute("class", "topo-resize-hit layer-resize-hit");
+    hit.setAttribute("d", handle.getAttribute("d"));
+    editor.appendChild(hit);
+    frag.appendChild(editor);
   });
   group.appendChild(frag);
+}
+
+function updateLayerBandElements(bands) {
+  const group = $("#topo-layers");
+  if (!group) return;
+  CURRENT_LAYER_BANDS = bands.map((band) => ({ ...band, width: Number(band.width), height: Number(band.height) }));
+  CURRENT_LAYER_BANDS.forEach((band) => {
+    const editor = group.querySelector(`[data-layout-id="layer:${band.key}"]`);
+    if (!editor) return;
+    const rect = editor.querySelector(".layer-band");
+    if (rect) {
+      rect.setAttribute("x", band.x);
+      rect.setAttribute("y", band.y);
+      rect.setAttribute("width", band.width);
+      rect.setAttribute("height", band.height);
+    }
+    const title = editor.querySelector(".layer-title");
+    if (title) {
+      title.setAttribute("x", Number(band.x) + 15);
+      title.setAttribute("y", Number(band.y) + 23);
+    }
+    const handlePath = `M${Number(band.x) + band.width - 14},${Number(band.y) + band.height - 5} l9,0 l0,-9`;
+    const handle = editor.querySelector(".layer-resize-handle");
+    if (handle) handle.setAttribute("d", handlePath);
+    const hit = editor.querySelector(".layer-resize-hit");
+    if (hit) hit.setAttribute("d", handlePath);
+  });
+}
+
+function editedLayerBands(layout, devices) {
+  return resolveLayerBands(layout, devices).map((band) => {
+    const size = LAYER_SIZES[`layer:${band.key}`];
+    return size ? { ...band, width: size.width, height: size.height } : band;
+  });
 }
 
 function renderNetworkRegions(model, bands) {
@@ -1301,9 +1376,10 @@ function applyCanvasSize(layout, bands) {
       maxX = Math.max(maxX, Number(band.x || 0) + Number(band.width || 0));
       maxY = Math.max(maxY, Number(band.y || 0) + Number(band.height || 0));
     });
-    Object.values(NODE_COORDINATES).forEach((coord) => {
-      maxX = Math.max(maxX, coord.x + NODE_SIZE.w);
-      maxY = Math.max(maxY, coord.y + NODE_SIZE.h);
+    Object.entries(NODE_COORDINATES).forEach(([id, coord]) => {
+      const size = NODE_SIZES[id] || { width: NODE_SIZE.w, height: NODE_SIZE.h };
+      maxX = Math.max(maxX, coord.x + size.width);
+      maxY = Math.max(maxY, coord.y + size.height);
     });
     width = width || maxX + 10;
     height = height || maxY + 20;
@@ -1391,13 +1467,19 @@ function setupTopoInteraction() {
   };
 
   svg.addEventListener("pointerdown", (event) => {
-    const node = event.target.closest(".topo-node");
+    const node = event.target.closest("[data-layout-id]");
     if (!state.topologyEditing || !node || event.button !== 0) return;
-    const id = node.dataset.deviceId;
+    const id = node.dataset.layoutId;
     const position = topologyLayoutEditor.get(id);
+    const size = topologyLayoutEditor.getSize(id);
     const point = toCanvasPoint(event);
-    if (!position || !point) return;
-    nodeDrag = { id, node, before: topologyLayoutEditor.snapshot(), offsetX: point.x - position.x, offsetY: point.y - position.y, startX: point.x, startY: point.y, moved: false };
+    const resizing = Boolean(event.target.closest(".topo-resize-handle, .topo-resize-hit"));
+    if (!size || !point || (!position && !resizing)) return;
+    nodeDrag = resizing
+      ? { id, node, resizing: true, before: topologyLayoutEditor.snapshotLayout(), startPoint: point,
+        startSize: size, startX: point.x, startY: point.y, moved: false }
+      : { id, node, before: topologyLayoutEditor.snapshot(), offsetX: point.x - position.x, offsetY: point.y - position.y,
+        startX: point.x, startY: point.y, moved: false };
     node.setPointerCapture?.(event.pointerId);
     event.preventDefault();
     event.stopPropagation();
@@ -1407,25 +1489,45 @@ function setupTopoInteraction() {
     if (!nodeDrag) return;
     const point = toCanvasPoint(event);
     if (!point) return;
-    const x = Math.round(point.x - nodeDrag.offsetX);
-    const y = Math.round(point.y - nodeDrag.offsetY);
+    const x = Math.round(point.x - (nodeDrag.offsetX || 0));
+    const y = Math.round(point.y - (nodeDrag.offsetY || 0));
     if (!nodeDrag.moved && (Math.abs(point.x - nodeDrag.startX) > 2 || Math.abs(point.y - nodeDrag.startY) > 2)) {
       nodeDrag.moved = true;
       state.dragMoved = true;
     }
     if (!nodeDrag.moved) return;
-    const current = topologyLayoutEditor.get(nodeDrag.id);
-    if (!current || (current.x === x && current.y === y)) return;
-    topologyLayoutEditor.positions[nodeDrag.id] = { x, y };
-    NODE_COORDINATES[nodeDrag.id] = { x, y };
-    nodeDrag.node.setAttribute("transform", `translate(${x}, ${y})`);
-    refreshEditedTopology();
+    if (nodeDrag.resizing) {
+      const width = Math.max(60, Math.round(nodeDrag.startSize.width + point.x - nodeDrag.startPoint.x));
+      const height = Math.max(36, Math.round(nodeDrag.startSize.height + point.y - nodeDrag.startPoint.y));
+      const nextSize = { width, height };
+      if (nodeDrag.id.startsWith("layer:")) {
+        topologyLayoutEditor.layerSizes[nodeDrag.id] = nextSize;
+        LAYER_SIZES[nodeDrag.id] = nextSize;
+      } else {
+        topologyLayoutEditor.sizes[nodeDrag.id] = nextSize;
+        NODE_SIZES[nodeDrag.id] = nextSize;
+      }
+    } else {
+      const current = topologyLayoutEditor.get(nodeDrag.id);
+      if (!current || (current.x === x && current.y === y)) return;
+      topologyLayoutEditor.positions[nodeDrag.id] = { x, y };
+      NODE_COORDINATES[nodeDrag.id] = { x, y };
+    }
+    if (!editRefreshFrame) {
+      editRefreshFrame = requestAnimationFrame(() => {
+        editRefreshFrame = 0;
+        refreshEditedTopology();
+        syncTopologyPositions();
+      });
+    }
   });
 
   window.addEventListener("pointerup", () => {
     if (!nodeDrag) return;
     if (nodeDrag.moved) {
-      topologyLayoutEditor.commitMove(nodeDrag.id, NODE_COORDINATES[nodeDrag.id], nodeDrag.before);
+      if (nodeDrag.resizing) topologyLayoutEditor.commitResize(nodeDrag.id,
+        nodeDrag.id.startsWith("layer:") ? LAYER_SIZES[nodeDrag.id] : NODE_SIZES[nodeDrag.id], nodeDrag.before);
+      else topologyLayoutEditor.commitMove(nodeDrag.id, NODE_COORDINATES[nodeDrag.id], nodeDrag.before);
       setTimeout(() => { state.dragMoved = false; }, 0);
       updateTopologyEditorControls();
     } else {
@@ -1436,7 +1538,7 @@ function setupTopoInteraction() {
 
   viewport.addEventListener("mousedown", (event) => {
     if (event.button !== 0) return;
-    if (state.topologyEditing && event.target.closest(".topo-node")) return;
+    if (state.topologyEditing && event.target.closest("[data-layout-id]")) return;
     if (event.target.closest("#zoom-reset, .topo-zoom-controls, .goose-attack-packet")) return;
     drag = { x: event.clientX, y: event.clientY, panX: state.pan.x, panY: state.pan.y, moved: false };
     viewport.classList.add("dragging");
@@ -1532,11 +1634,13 @@ function refreshEditedTopology() {
   const topo = state.systemData?.topology;
   if (!topo) return;
   const effective = topologyWithEditedLayout(topo);
-  state.networkModel = NetworkTopology.build(effective, NODE_COORDINATES);
+  state.networkModel = NetworkTopology.build(effective, NODE_COORDINATES, NODE_SIZES);
+  const bands = editedLayerBands(effective.layout || {}, effective.devices || []);
+  updateLayerBandElements(bands);
   renderTopologyLinks();
-  renderNetworkRegions(state.networkModel, resolveLayerBands(effective.layout || {}, effective.devices || []));
+  renderNetworkRegions(state.networkModel, bands);
   renderNetworkAssets(state.systemData);
-  applyCanvasSize(effective.layout || {}, resolveLayerBands(effective.layout || {}, effective.devices || []));
+  applyCanvasSize(effective.layout || {}, bands);
   updateTopologyEditorControls();
 }
 
@@ -1546,8 +1650,8 @@ function topologyWithEditedLayout(topo) {
   (topo.links || []).forEach((link) => {
     const direct = directLinks[link.link_id];
     if (!direct?.points?.length) return;
-    const startDelta = coordinateDelta(initial[link.endpoint_a?.[0]], NODE_COORDINATES[link.endpoint_a?.[0]]);
-    const endDelta = coordinateDelta(initial[link.endpoint_b?.[0]], NODE_COORDINATES[link.endpoint_b?.[0]]);
+    const startDelta = geometryDelta(link.endpoint_a?.[0]);
+    const endDelta = geometryDelta(link.endpoint_b?.[0]);
     directLinks[link.link_id] = { ...direct, points: moveRouteEndpoints(direct.points, startDelta, endDelta) };
   });
   return { ...topo, layout: { ...topo.layout, deployment: topo.layout?.deployment
@@ -1556,6 +1660,17 @@ function topologyWithEditedLayout(topo) {
 
 function coordinateDelta(from, to) {
   return from && to ? { x: to.x - from.x, y: to.y - from.y } : { x: 0, y: 0 };
+}
+
+// 固定线路的端点通常落在模块中心；模块缩放后，端点也要随中心移动。
+function geometryDelta(id) {
+  const positionDelta = coordinateDelta(topologyLayoutEditor.initial[id], NODE_COORDINATES[id]);
+  const initialSize = topologyLayoutEditor.initialSizes[id] || { width: NODE_SIZE.w, height: NODE_SIZE.h };
+  const currentSize = NODE_SIZES[id] || initialSize;
+  return {
+    x: positionDelta.x + (currentSize.width - initialSize.width) / 2,
+    y: positionDelta.y + (currentSize.height - initialSize.height) / 2,
+  };
 }
 
 function moveRouteEndpoints(points, startDelta, endDelta) {
@@ -1576,9 +1691,18 @@ function moveRouteEndpoints(points, startDelta, endDelta) {
 
 function applyTopologyEditorHistory(action) {
   if (!topologyLayoutEditor[action]()) return;
-  Object.assign(NODE_COORDINATES, topologyLayoutEditor.snapshot());
+  applyTopologyEditorSnapshot();
   refreshEditedTopology();
   syncTopologyPositions();
+}
+
+function applyTopologyEditorSnapshot() {
+  Object.keys(NODE_COORDINATES).forEach((key) => delete NODE_COORDINATES[key]);
+  Object.assign(NODE_COORDINATES, topologyLayoutEditor.snapshot());
+  Object.keys(NODE_SIZES).forEach((key) => delete NODE_SIZES[key]);
+  Object.assign(NODE_SIZES, topologyLayoutEditor.sizes);
+  Object.keys(LAYER_SIZES).forEach((key) => delete LAYER_SIZES[key]);
+  Object.assign(LAYER_SIZES, topologyLayoutEditor.layerSizes);
 }
 
 /* 图例只展示当前场景实际存在的链路类型；“影响信号”仅在有电磁干扰链路时出现 */
@@ -1611,12 +1735,18 @@ function applyScenarioLayout(topo) {
 
   Object.keys(NODE_COORDINATES).forEach((key) => delete NODE_COORDINATES[key]);
   Object.assign(NODE_COORDINATES, resolveNodeCoordinates(devices, layout));
+  Object.keys(NODE_SIZES).forEach((key) => delete NODE_SIZES[key]);
+  resolveTopologyGeometry(topo, NODE_COORDINATES, NODE_SIZES);
   const scenarioId = state.activeScenarioId || topo.scenario_id || state.selectedScenario || "unknown";
-  topologyLayoutEditor.configure(scenarioId, NODE_COORDINATES);
-  Object.assign(NODE_COORDINATES, topologyLayoutEditor.snapshot());
+  const initialBands = resolveLayerBands(layout, devices);
+  const initialLayerSizes = Object.fromEntries(initialBands.map((band) => [
+    `layer:${band.key}`, { width: Number(band.width), height: Number(band.height) },
+  ]));
+  topologyLayoutEditor.configure(scenarioId, NODE_COORDINATES, NODE_SIZES, initialLayerSizes);
+  applyTopologyEditorSnapshot();
 
-  const bands = resolveLayerBands(layout, devices);
-  state.networkModel = NetworkTopology.build(topo, NODE_COORDINATES);
+  const bands = editedLayerBands(layout, devices);
+  state.networkModel = NetworkTopology.build(topo, NODE_COORDINATES, NODE_SIZES);
   renderLayerBands(bands);
   renderNetworkRegions(state.networkModel, bands);
   applyCanvasSize(layout, bands);
@@ -1797,14 +1927,18 @@ function renderNetworkAssets(data) {
   const group = $("#topo-network-assets");
   const model = state.networkModel;
   if (!group || !model) return;
-  const key = JSON.stringify([model.assets, model.interfaces]);
+  const key = JSON.stringify([
+    model.assets.map(({ id, kind, network_id, name }) => ({ id, kind, network_id, name })),
+    model.interfaces.map(({ network_id, interface_id }) => ({ network_id, interface_id })),
+  ]);
   if (group.dataset.renderKey !== key) {
     group.dataset.renderKey = key;
     group.replaceChildren();
     for (const asset of model.assets) {
       const node = document.createElementNS("http://www.w3.org/2000/svg", "g");
       node.setAttribute("transform", `translate(${asset.x},${asset.y})`);
-      node.setAttribute("class", `network-asset ${asset.kind}`);
+     node.setAttribute("class", `network-asset ${asset.kind}`);
+     node.dataset.layoutId = asset.id;
       node.setAttribute("role", "button");
       node.setAttribute("tabindex", "0");
       node.setAttribute("aria-label", `查看${asset.name}`);
@@ -1812,10 +1946,12 @@ function renderNetworkAssets(data) {
       const network = model.networks.find(n => n.id === asset.network_id);
       const subtitle = asset.kind === "switch" ? `${network.connections.length} 个接入端口 · ${network.mirror_port}` :
         asset.kind === "probe" ? "CAP0 采集 / MGMT 上报" : "集中查看监测结果";
-      node.innerHTML = `<rect width="${asset.width}" height="${asset.height}" rx="7" />
+       node.innerHTML = `<rect width="${asset.width}" height="${asset.height}" rx="7" />
         <text x="12" y="23" class="network-name">${esc(asset.name)}</text>
         <text x="12" y="42" class="network-subtitle">${esc(subtitle)}</text>
-        <text x="12" y="62" class="network-status"></text>`;
+         <text x="12" y="62" class="network-status"></text>
+          <path class="topo-resize-handle" d="M${asset.width - 14},${asset.height - 5} l9,0 l0,-9" />
+          <path class="topo-resize-hit" d="M${asset.width - 14},${asset.height - 5} l9,0 l0,-9" />`;
       node.addEventListener("click", () => selectNetworkAsset(asset.id));
       node.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -1834,6 +1970,33 @@ function renderNetworkAssets(data) {
       group.appendChild(node);
     }
   }
+  model.assets.forEach((asset) => {
+    const node = group.querySelector(`[data-network-asset="${asset.id}"]`);
+    if (!node) return;
+    node.setAttribute("transform", `translate(${asset.x},${asset.y})`);
+    const rect = node.querySelector("rect");
+    if (rect) {
+      rect.setAttribute("width", asset.width);
+      rect.setAttribute("height", asset.height);
+    }
+    const handlePath = `M${asset.width - 14},${asset.height - 5} l9,0 l0,-9`;
+    node.querySelector(".topo-resize-handle")?.setAttribute("d", handlePath);
+    node.querySelector(".topo-resize-hit")?.setAttribute("d", handlePath);
+  });
+  group.querySelectorAll(".network-interface").forEach((node, index) => {
+    const port = model.interfaces[index];
+    if (!port) return;
+    const circles = node.querySelectorAll("circle");
+    circles[0]?.setAttribute("cx", port.anchor.x);
+    circles[0]?.setAttribute("cy", port.anchor.y);
+    circles[1]?.setAttribute("cx", port.port.x);
+    circles[1]?.setAttribute("cy", port.port.y);
+    const label = node.querySelector("text");
+    if (label) {
+      label.setAttribute("x", port.anchor.x + 6);
+      label.setAttribute("y", port.anchor.y + (port.anchor_y ? 12 : -7));
+    }
+  });
   group.querySelectorAll("[data-network-asset]").forEach(node => {
     const id = node.dataset.networkAsset;
     const asset = model.assets.find(a => a.id === id);
@@ -1986,13 +2149,14 @@ function renderNetworkInspector(data) {
   }
 }
 
-function renderNodeTitle(name) {
+function renderNodeTitle(name, width = NODE_SIZE.w) {
+  const center = width / 2;
   const characters = Array.from(String(name));
   if (characters.length <= 7) {
-    return `<text x="45" y="22" text-anchor="middle" class="node-title">${esc(name)}</text>`;
+    return `<text x="${center}" y="22" text-anchor="middle" class="node-title">${esc(name)}</text>`;
   }
   const split = Math.ceil(characters.length / 2);
-  return `<text x="45" text-anchor="middle" class="node-title node-title-wrapped"><tspan x="45" y="15">${esc(characters.slice(0, split).join(""))}</tspan><tspan x="45" y="29">${esc(characters.slice(split).join(""))}</tspan></text>`;
+  return `<text x="${center}" text-anchor="middle" class="node-title node-title-wrapped"><tspan x="${center}" y="15">${esc(characters.slice(0, split).join(""))}</tspan><tspan x="${center}" y="29">${esc(characters.slice(split).join(""))}</tspan></text>`;
 }
 
 /* 渲染/增量更新态势拓扑图 (SVG) */
@@ -2049,6 +2213,7 @@ function renderTopology(data) {
     devices.forEach((dev) => {
       const id = dev.device_id;
       const coord = NODE_COORDINATES[id] || { x: 100, y: 100 };
+      const size = NODE_SIZES[id] || { width: NODE_SIZE.w, height: NODE_SIZE.h };
 
       let statusClass = "status-normal";
       if (attackedDeviceIds.has(id)) statusClass = "status-attacked";
@@ -2063,6 +2228,7 @@ function renderTopology(data) {
       g.setAttribute("class", `topo-node ${statusClass} ${kindClass} ${tamperedClass} ${isSelected ? "selected" : ""}`);
       g.setAttribute("transform", `translate(${coord.x}, ${coord.y})`);
       g.setAttribute("data-device-id", id);
+      g.dataset.layoutId = id;
       g.setAttribute("role", "button");
       g.setAttribute("tabindex", "0");
       g.setAttribute("aria-label", `查看${dev.name || id}`);
@@ -2074,9 +2240,11 @@ function renderTopology(data) {
       });
 
       g.innerHTML = `
-        <rect width="90" height="48" rx="6"></rect>
-        ${renderNodeTitle(dev.name || id)}
-        <text x="45" y="42" text-anchor="middle" class="node-status-text" id="node-text-${esc(id)}">${esc(dynamicText)}</text>
+         <rect width="${size.width}" height="${size.height}" rx="6"></rect>
+         ${renderNodeTitle(dev.name || id, size.width)}
+         <text x="${size.width / 2}" y="${Math.max(32, size.height - 6)}" text-anchor="middle" class="node-status-text" id="node-text-${esc(id)}">${esc(dynamicText)}</text>
+         <path class="topo-resize-handle" d="M${size.width - 14},${size.height - 5} l9,0 l0,-9" />
+         <path class="topo-resize-hit" d="M${size.width - 14},${size.height - 5} l9,0 l0,-9" />
       `;
 
       g.addEventListener("click", () => {
@@ -2101,6 +2269,21 @@ function renderTopology(data) {
       if (coord) {
         g.setAttribute("transform", `translate(${coord.x}, ${coord.y})`);
       }
+      const size = NODE_SIZES[id] || NODE_SIZE;
+      const rect = g.querySelector("rect");
+      if (rect) { rect.setAttribute("width", size.width); rect.setAttribute("height", size.height); }
+      const title = g.querySelector(".node-title");
+      if (title) {
+        const center = size.width / 2;
+        title.setAttribute("x", center);
+        title.querySelectorAll("tspan").forEach((tspan) => tspan.setAttribute("x", center));
+      }
+      const statusNode = g.querySelector(".node-status-text");
+      if (statusNode) { statusNode.setAttribute("x", size.width / 2); statusNode.setAttribute("y", Math.max(32, size.height - 6)); }
+      const resizeHandle = g.querySelector(".topo-resize-handle");
+      if (resizeHandle) resizeHandle.setAttribute("d", `M${size.width - 14},${size.height - 5} l9,0 l0,-9`);
+      const resizeHit = g.querySelector(".topo-resize-hit");
+      if (resizeHit) resizeHit.setAttribute("d", `M${size.width - 14},${size.height - 5} l9,0 l0,-9`);
 
       let statusClass = "status-normal";
       if (attackedDeviceIds.has(id)) statusClass = "status-attacked";
@@ -2550,12 +2733,49 @@ function syncTopologyPositions() {
   const linksGroup = $("#topo-links");
   if (!nodesGroup || !linksGroup) return;
 
-  // 1. 同步所有节点绝对坐标
+  // 同步普通设备的位置、尺寸和尺寸手柄。缩放过程不重建整个节点组，避免状态闪烁。
   Object.entries(NODE_COORDINATES).forEach(([devId, coord]) => {
     const g = nodesGroup.querySelector(`[data-device-id="${devId}"]`);
     if (g) {
       g.setAttribute("transform", `translate(${coord.x}, ${coord.y})`);
+      const size = NODE_SIZES[devId] || NODE_SIZE;
+      const rect = g.querySelector("rect");
+      if (rect) {
+        rect.setAttribute("width", size.width);
+        rect.setAttribute("height", size.height);
+      }
+      const title = g.querySelector(".node-title");
+      if (title) {
+        const center = size.width / 2;
+        title.setAttribute("x", center);
+        title.querySelectorAll("tspan").forEach((tspan) => tspan.setAttribute("x", center));
+      }
+      const status = g.querySelector(".node-status-text");
+      if (status) {
+        status.setAttribute("x", size.width / 2);
+        status.setAttribute("y", Math.max(32, size.height - 6));
+      }
+      const handle = g.querySelector(".topo-resize-handle");
+      if (handle) handle.setAttribute("d", `M${size.width - 14},${size.height - 5} l9,0 l0,-9`);
+      const hit = g.querySelector(".topo-resize-hit");
+      if (hit) hit.setAttribute("d", `M${size.width - 14},${size.height - 5} l9,0 l0,-9`);
     }
+  });
+
+  // 网络交换机、IDS 和监测平台同样通过 layout id 取几何状态。
+  document.querySelectorAll("#topo-network-assets [data-layout-id]").forEach((g) => {
+    const id = g.dataset.layoutId;
+    const coord = NODE_COORDINATES[id];
+    if (coord) g.setAttribute("transform", `translate(${coord.x},${coord.y})`);
+    const size = NODE_SIZES[id];
+    if (!size) return;
+    const rect = g.querySelector("rect");
+    if (rect) {
+      rect.setAttribute("width", size.width);
+      rect.setAttribute("height", size.height);
+    }
+    const handle = g.querySelector(".topo-resize-handle");
+    if (handle) handle.setAttribute("d", `M${size.width - 14},${size.height - 5} l9,0 l0,-9`);
   });
 
   renderTopologyLinks();

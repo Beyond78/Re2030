@@ -74,3 +74,38 @@ test('storage failures do not break layout editing', () => {
   assert.equal(editor.reset(), true);
   assert.deepEqual(editor.get('a'), { x: 1, y: 2 });
 });
+
+test('persists sizes and treats resize as one undoable layout change', () => {
+  const storage = memoryStorage();
+  const editor = new TopologyLayoutEditor(storage);
+  editor.configure('alpha', { a: { x: 1, y: 2 } }, { a: { width: 90, height: 48 } });
+  const before = editor.snapshotLayout();
+  editor.sizes.a = { width: 160, height: 72 };
+  assert.equal(editor.commitResize('a', editor.sizes.a, before), true);
+  assert.equal(editor.undo(), true);
+  assert.deepEqual(editor.getSize('a'), { width: 90, height: 48 });
+  assert.equal(editor.redo(), true);
+  assert.deepEqual(editor.getSize('a'), { width: 160, height: 72 });
+  assert.equal(editor.save(), true);
+  editor.configure('beta', { b: { x: 3, y: 4 } }, { b: { width: 80, height: 40 } });
+  editor.configure('alpha', { a: { x: 1, y: 2 } }, { a: { width: 90, height: 48 } });
+  assert.deepEqual(editor.getSize('a'), { width: 160, height: 72 });
+});
+
+test('persists editable layer background sizes independently from device sizes', () => {
+  const storage = memoryStorage();
+  const editor = new TopologyLayoutEditor(storage);
+  editor.configure('alpha', { a: { x: 1, y: 2 } }, { a: { width: 90, height: 48 } }, {
+    'layer:process': { width: 600, height: 300 },
+  });
+  const before = editor.snapshotLayout();
+  editor.layerSizes['layer:process'] = { width: 820, height: 420 };
+  assert.equal(editor.commitResize('layer:process', editor.layerSizes['layer:process'], before), true);
+  assert.deepEqual(editor.getSize('layer:process'), { width: 820, height: 420 });
+  assert.equal(editor.save(), true);
+  const restored = new TopologyLayoutEditor(storage);
+  restored.configure('alpha', { a: { x: 1, y: 2 } }, { a: { width: 90, height: 48 } }, {
+    'layer:process': { width: 600, height: 300 },
+  });
+  assert.deepEqual(restored.getSize('layer:process'), { width: 820, height: 420 });
+});
