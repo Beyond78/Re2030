@@ -125,6 +125,210 @@ class TestNetworkDeployment(unittest.TestCase):
             finally:
                 server.close()
 
+    def test_clone_and_publish_scenario_persists_and_is_listed_after_reload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.json"
+            source.write_text((ROOT / "scenarios/substation-live.json").read_text(encoding="utf-8"), encoding="utf-8")
+            server = PresentationServer(str(root), str(root / "runs"))
+            try:
+                status, payload, _ = server.handle_request("POST", "/api/scenarios/clone", json.dumps({
+                    "source_scenario_id": "substation-live",
+                    "new_scenario_id": "demo-copy",
+                    "name": "变电站复制场景",
+                    "topology_layout": {
+                        "positions": {"station": {"x": 300, "y": 200}},
+                        "sizes": {"station": {"width": 140, "height": 72}},
+                        "layerSizes": {"layer:process": {"width": 900, "height": 420}},
+                        "customModules": [{"id": "copy-1", "kind": "sensor", "name": "复制传感器", "x": 500, "y": 600, "width": 120, "height": 60}],
+                        "customLinks": [{"id": "link-1", "source": "copy-1", "target": "station", "type": "measurement"}],
+                        "nodeOverrides": {"station": {"name": "站控系统副本"}},
+                        "hiddenNodes": ["ids-process"],
+                        "hiddenLinks": ["process:mirror"],
+                        "linkStyles": {"process:mirror": "mirror"},
+                    },
+                }).encode("utf-8"))
+                self.assertEqual(status, 201)
+                self.assertEqual(payload["status"], "published")
+                published = root / "demo-copy.json"
+                self.assertTrue(published.is_file())
+                raw = json.loads(published.read_text(encoding="utf-8"))
+                self.assertEqual(raw["scenario_id"], "demo-copy")
+                self.assertEqual(raw["name"], "变电站复制场景")
+                self.assertEqual(raw["devices"], json.loads(source.read_text(encoding="utf-8"))["devices"])
+                self.assertEqual(raw["layout"]["editor"]["customModules"][0]["name"], "复制传感器")
+                self.assertEqual(raw["layout"]["editor"]["customLinks"][0]["type"], "measurement")
+                self.assertEqual(raw["layout"]["editor"]["nodeOverrides"]["station"]["name"], "站控系统副本")
+                self.assertEqual(raw["layout"]["editor"]["hiddenNodes"], ["ids-process"])
+                self.assertEqual(raw["layout"]["editor"]["hiddenLinks"], ["process:mirror"])
+                self.assertEqual(raw["layout"]["editor"]["linkStyles"], {"process:mirror": "mirror"})
+                listed = server.handle_request("GET", "/api/scenarios")[1]["scenarios"]
+                self.assertIn("demo-copy", {item["scenario_id"] for item in listed})
+                status, _, _ = server.handle_request("POST", "/api/scenarios/clone", json.dumps({
+                    "source_scenario_id": "substation-live",
+                    "new_scenario_id": "demo-copy",
+                    "name": "重复发布",
+                }).encode("utf-8"))
+                self.assertEqual(status, 409)
+            finally:
+                server.close()
+            reloaded = PresentationServer(str(root), str(root / "runs"))
+            try:
+                listed = reloaded.handle_request("GET", "/api/scenarios")[1]["scenarios"]
+                self.assertIn("demo-copy", {item["scenario_id"] for item in listed})
+                status, payload, _ = reloaded.handle_request("POST", "/api/runs", json.dumps({"scenario_id": "demo-copy"}).encode("utf-8"))
+                self.assertEqual(status, 201)
+                self.assertEqual(payload["scenario_id"], "demo-copy")
+            finally:
+                reloaded.close()
+
+    def test_clone_materializes_bound_editor_nodes_and_links_for_runtime(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.json"
+            source.write_text((ROOT / "scenarios/substation-live.json").read_text(encoding="utf-8"), encoding="utf-8")
+            server = PresentationServer(str(root), str(root / "runs"))
+            try:
+                layout = {
+                    "positions": {"copy-ct": {"x": 760, "y": 840}},
+                    "sizes": {"copy-ct": {"width": 156, "height": 82}},
+                    "layerSizes": {},
+                    "customModules": [{"id": "copy-ct", "sourceId": "ct_current", "sourceName": "电流传感器",
+                                       "kind": "sensor", "name": "复制电流传感器", "x": 500, "y": 500,
+                                       "width": 110, "height": 58}],
+                    "customLinks": [{"id": "copy-link", "source": "copy-ct", "target": "mu",
+                                     "type": "wired", "sourcePort": "up", "targetPort": "in"}],
+                    "nodeOverrides": {}, "hiddenNodes": [], "hiddenLinks": [], "linkStyles": {},
+                }
+                status, payload, _ = server.handle_request("POST", "/api/scenarios/clone", json.dumps({
+                    "source_scenario_id": "substation-live", "new_scenario_id": "runtime-copy",
+                    "name": "运行复制场景", "topology_layout": layout,
+                }).encode("utf-8"))
+                self.assertEqual(status, 201)
+                self.assertEqual(payload["runtime"]["devices_added"], 1)
+                self.assertEqual(payload["runtime"]["links_added"], 1)
+                config = load_scenario(str(root / "runtime-copy.json"))
+                copied_id = "runtime-copy-copy-ct"
+                self.assertIn(copied_id, {device.device_id for device in config.devices})
+                self.assertIn((copied_id, "up"), {(link.endpoint_a[0], link.endpoint_a[1]) for link in config.links})
+                published = json.loads((root / "runtime-copy.json").read_text(encoding="utf-8"))
+                published_module = published["layout"]["editor"]["customModules"][0]
+                published_link = published["layout"]["editor"]["customLinks"][0]
+                self.assertEqual(published_module["runtimeId"], copied_id)
+                self.assertEqual(published_module["runtimeId"], published["devices"][-1]["device_id"])
+                self.assertEqual(published_module["x"], 760)
+                self.assertEqual(published_module["y"], 840)
+                self.assertEqual(published_module["width"], 156)
+                self.assertEqual(published_module["height"], 82)
+                self.assertEqual(published["devices"][-1]["layout"], {"x": 760, "y": 840, "width": 156, "height": 82})
+                self.assertEqual(published_link["runtimeId"], published["links"][-1]["link_id"])
+                self.assertEqual(validate_scenario(config), [])
+                run_id = server.application.load(str(root / "runtime-copy.json"))
+                self.assertIn(copied_id, server.application.engine._devices)
+                server.application.start()
+                for _ in range(3):
+                    server.application.step()
+                received = server.application.engine._devices["mu"]._latest
+                self.assertIn(copied_id, received)
+                self.assertEqual(received[copied_id]["sensor_id"], copied_id)
+                status, system_payload, _ = server.handle_request("GET", f"/api/runs/{run_id}/views?view=system")
+                self.assertEqual(status, 200)
+                system = system_payload["data"]
+                runtime_devices = [device for device in system["topology"]["devices"] if device["device_id"] == copied_id]
+                self.assertEqual(len(runtime_devices), 1)
+                self.assertEqual(runtime_devices[0]["layout"], {"x": 760, "y": 840, "width": 156, "height": 82})
+                runtime_links = [link for link in system["topology"]["links"] if link["link_id"] == published_link["runtimeId"]]
+                self.assertEqual(len(runtime_links), 1)
+                self.assertEqual(runtime_links[0]["endpoint_a"][0], copied_id)
+            finally:
+                server.close()
+
+    def test_delete_scenario_removes_file_and_refreshes_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "delete-me.json"
+            raw = json.loads((ROOT / "scenarios/substation-live.json").read_text(encoding="utf-8"))
+            raw["scenario_id"] = "delete-me"
+            raw["name"] = "待删除场景"
+            source.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+            server = PresentationServer(str(root), str(root / "runs"))
+            try:
+                status, payload, _ = server.handle_request("DELETE", "/api/scenarios/delete-me")
+                self.assertEqual(status, 200)
+                self.assertEqual(payload["status"], "deleted")
+                self.assertFalse(source.exists())
+                listed = server.handle_request("GET", "/api/scenarios")[1]["scenarios"]
+                self.assertNotIn("delete-me", {item["scenario_id"] for item in listed})
+                status, payload, _ = server.handle_request("DELETE", "/api/scenarios/delete-me")
+                self.assertEqual(status, 404)
+                self.assertIn("未找到场景", payload["error"])
+            finally:
+                server.close()
+
+    def test_delete_rejects_current_running_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "active.json"
+            raw = json.loads((ROOT / "scenarios/substation-live.json").read_text(encoding="utf-8"))
+            raw["scenario_id"] = "active"
+            source.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+            server = PresentationServer(str(root), str(root / "runs"))
+            try:
+                status, created, _ = server.handle_request("POST", "/api/runs", json.dumps({"scenario_id": "active"}).encode("utf-8"))
+                self.assertEqual(status, 201)
+                self.assertEqual(created["scenario_id"], "active")
+                status, payload, _ = server.handle_request("DELETE", "/api/scenarios/active")
+                self.assertEqual(status, 409)
+                self.assertIn("正在运行", payload["error"])
+                self.assertTrue(source.exists())
+            finally:
+                server.close()
+
+    def test_clone_removes_temp_file_when_published_runtime_validation_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "substation-live.json"
+            source.write_text((ROOT / "scenarios/substation-live.json").read_text(encoding="utf-8"), encoding="utf-8")
+            server = PresentationServer(str(root), str(root / "runs"))
+            try:
+                layout = {
+                    "positions": {}, "sizes": {}, "layerSizes": {},
+                    "customModules": [{"id": "copy-ct", "sourceId": "ct_current", "name": "复制电流传感器",
+                                       "kind": "sensor", "x": 500, "y": 500, "width": 110, "height": 58}],
+                    "customLinks": [{"id": "invalid-link", "source": "copy-ct", "target": "mu",
+                                     "type": "wired", "sourcePort": "missing-port", "targetPort": "in"}],
+                    "nodeOverrides": {}, "hiddenNodes": [], "hiddenLinks": [], "linkStyles": {},
+                }
+                status, payload, _ = server.handle_request("POST", "/api/scenarios/clone", json.dumps({
+                    "source_scenario_id": "substation-live", "new_scenario_id": "invalid-runtime-copy",
+                    "name": "非法运行场景", "topology_layout": layout,
+                }).encode("utf-8"))
+                self.assertEqual(status, 400)
+                self.assertIn("发布后的场景校验失败", payload["error"])
+                self.assertFalse((root / "invalid-runtime-copy.json").exists())
+                self.assertFalse(any(path.name.startswith(".invalid-runtime-copy.") for path in root.iterdir()))
+            finally:
+                server.close()
+
+    def test_clone_rejects_invalid_editor_layout_without_creating_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.json"
+            source.write_text((ROOT / "scenarios/substation-live.json").read_text(encoding="utf-8"), encoding="utf-8")
+            server = PresentationServer(str(root), str(root / "runs"))
+            try:
+                status, payload, _ = server.handle_request("POST", "/api/scenarios/clone", json.dumps({
+                    "source_scenario_id": "substation-live",
+                    "new_scenario_id": "invalid-layout-copy",
+                    "name": "非法布局",
+                    "topology_layout": {"positions": {"station": {"x": "bad", "y": 20}}},
+                }).encode("utf-8"))
+                self.assertEqual(status, 400)
+                self.assertIn("拓扑布局无效", payload["error"])
+                self.assertFalse((root / "invalid-layout-copy.json").exists())
+            finally:
+                server.close()
+
     def test_finished_view_preserves_deployment_and_only_latest_window_ids(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

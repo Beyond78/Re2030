@@ -47,7 +47,7 @@ const NetworkTopology = (() => {
         const points = [anchor, { x: anchor.x, y: port.y }, port];
         access.set(connection.device_id, points);
         interfaces.push({ ...connection, network_id: network.id, anchor, port });
-        cables.push({ id: `${network.id}:${connection.switch_port}`, kind: network.id, display_group: "network-access", network_id: network.id, points,
+        cables.push({ id: `${network.id}:${connection.switch_port}`, kind: network.id, display_group: "network-access", network_id: network.id, endpointIds: [connection.device_id, network.switch.id], points,
           title: `${connection.device_id} / ${connection.interface_id} ↔ ${sw.name} / ${connection.switch_port}` });
       });
       for (const id of network.link_ids) {
@@ -65,7 +65,7 @@ const NetworkTopology = (() => {
       }
       const mirrorStart = { x: sw.x + sw.width, y: sw.y + sw.height / 2 };
       const mirrorEnd = { x: probe.x, y: probe.y + probe.height / 2 };
-      cables.push({ id: `${network.id}:mirror`, kind: "mirror", display_group: "monitoring",
+      cables.push({ id: `${network.id}:mirror`, kind: "mirror", display_group: "monitoring", endpointIds: [network.switch.id, network.probe.id],
         points: [mirrorStart, { x: mirrorEnd.x - 20, y: mirrorStart.y },
           { x: mirrorEnd.x - 20, y: mirrorEnd.y }, mirrorEnd],
         title: `${sw.name} / ${network.mirror_port} → ${probe.name} / ${probe.capture_interface}（只接收镜像）` });
@@ -77,7 +77,7 @@ const NetworkTopology = (() => {
       networks.forEach((network, index) => {
         const probe = network.probe;
         const outsideX = manager.x + manager.width + 18 + index * 14;
-        cables.push({ id: `${network.id}:management`, kind: "management", display_group: "monitoring",
+        cables.push({ id: `${network.id}:management`, kind: "management", display_group: "monitoring", endpointIds: [probe.id, manager.id],
           points: [{ x: probe.x + probe.width, y: probe.y + probe.height / 2 },
             { x: outsideX, y: probe.y + probe.height / 2 },
             { x: outsideX, y: manager.y + 20 + index * 18 },
@@ -95,7 +95,7 @@ const NetworkTopology = (() => {
       const points = direct?.points || [center(a, sizes[endpointId(link.endpoint_a)]), center(b, sizes[endpointId(link.endpoint_b)])];
       const kind = direct?.role || link.link_type || "wired";
       routes.set(link.link_id, { points, link, network_id: null });
-      cables.push({ id: link.link_id, kind, display_group: kind, points,
+      cables.push({ id: link.link_id, kind, display_group: kind, endpointIds: [endpointId(link.endpoint_a), endpointId(link.endpoint_b)], points,
         title: `${endpointId(link.endpoint_a)} ↔ ${endpointId(link.endpoint_b)} · ${direct?.label || kind}` });
     }
 
@@ -112,7 +112,7 @@ const NetworkTopology = (() => {
         const originSize = sizes[originId] || { width: 90 };
         const x = origin.x + originSize.width / 2;
         const points = [{ x, y: origin.y }, { x, y: sw.y + sw.height }];
-        cables.push({ id: `${target.id}:attack`, kind: "attack-access", display_group: "attack-access", points,
+        cables.push({ id: `${target.id}:attack`, kind: "attack-access", display_group: "attack-access", endpointIds: [originId, sw.id], points,
           title: `${originId} ↔ ${sw.name}（场景假定攻击者已接入过程网，注入攻击报文）` });
       }
     }

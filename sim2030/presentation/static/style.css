@@ -51,6 +51,11 @@
 .topo-custom-link-hit { fill: none; stroke: transparent; stroke-width: 18; pointer-events: stroke; cursor: pointer; }
 .topology-editing .topo-custom-link-hit { pointer-events: stroke; }
 .topo-custom-link.topology-edit-selected { stroke: #fbbf24 !important; filter: drop-shadow(0 0 4px rgba(251, 191, 36, .7)); }
+.topo-native-link-hit { fill: none; stroke: transparent; stroke-width: 18; pointer-events: stroke; cursor: pointer; }
+.topology-admin-page #topo-native-link-hits { pointer-events: none; }
+.topology-admin-page .topo-viewport.topology-editing #topo-native-link-hits { pointer-events: auto; }
+.topo-link.topology-edit-selected { stroke: #fbbf24 !important; stroke-width: 4 !important; opacity: 1; filter: drop-shadow(0 0 4px rgba(251, 191, 36, .7)); }
+.topo-native-link-hidden, .topo-native-node-hidden { display: none !important; }
 .topology-edit-selected rect { stroke: #fbbf24 !important; stroke-width: 3 !important; filter: drop-shadow(0 0 5px rgba(251, 191, 36, .65)); }
 .topology-edit-selected.topo-custom-node rect { stroke: #fbbf24 !important; }
 .topology-edit-selected.topo-custom-link { stroke: #fbbf24; stroke-width: 4; opacity: 1; }
@@ -402,6 +407,7 @@ body {
 }
 
 .scenario-list li {
+  position: relative;
   padding: 8px 10px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
@@ -410,6 +416,30 @@ body {
   font-size: 12px;
   transition: all 0.2s ease;
   line-height: 1.4;
+}
+
+.topology-admin-page .scenario-list li {
+  padding-right: 52px;
+}
+
+.scenario-delete {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  transform: translateY(-50%);
+  border: 1px solid rgba(248, 113, 113, .35);
+  border-radius: 4px;
+  padding: 3px 6px;
+  background: rgba(127, 29, 29, .25);
+  color: #fca5a5;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.scenario-delete:hover {
+  border-color: #fb7185;
+  background: rgba(127, 29, 29, .55);
+  color: #fff;
 }
 
 .scenario-list li:hover {
@@ -1884,7 +1914,11 @@ body.packet-inspector-open {
 .topology-admin-page .layout { grid-template-columns: 230px minmax(0, 1fr); height: calc(100dvh - 56px); }
 .topology-admin-page .left-panel { overflow-y: auto; }
 .topology-admin-page .right-panel { display: none; }
-.topology-admin-page .left-panel > :not(.panel-header):not(#scenario-section-title):not(#scenario-list) { display: none !important; }
+.topology-admin-page .left-panel > :not(.panel-header):not(#scenario-section-title):not(#scenario-list):not(.scenario-publish-panel) { display: none !important; }
+.topology-admin-page .scenario-publish-panel { display: grid; gap: 6px; margin-top: 10px; padding: 10px; border: 1px solid rgba(56, 189, 248, .2); border-radius: 6px; background: rgba(8, 20, 35, .55); }
+.scenario-publish-title { color: #cfe3f6; font-size: 11px; font-weight: 600; }
+.scenario-publish-panel input { width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid #334b68; border-radius: 4px; background: #0f1e31; color: #e5eef7; font-size: 11px; }
+.scenario-publish-panel small { min-height: 15px; color: #86efac; font-size: 10px; }
 .topology-admin-page .left-panel .section-title:not(#scenario-section-title) { display: none !important; }
 .topology-admin-page .left-panel .panel-header { margin-bottom: 8px; }
 .topology-admin-page .left-panel .section-title { margin-top: 4px; }

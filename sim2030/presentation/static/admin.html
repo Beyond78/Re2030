@@ -66,6 +66,13 @@
 
       <div id="scenario-section-title" class="section-title">选择场景以编辑拓扑</div>
       <ul id="scenario-list" class="scenario-list"></ul>
+      <section class="scenario-publish-panel" aria-label="复制发布场景">
+        <div class="scenario-publish-title">复制并发布场景</div>
+        <input id="scenario-copy-id" type="text" maxlength="64" placeholder="新场景 ID" aria-label="新场景 ID">
+        <input id="scenario-copy-name" type="text" maxlength="80" placeholder="新场景名称" aria-label="新场景名称">
+        <button id="scenario-copy-publish" type="button" class="btn btn-primary btn-block">复制发布</button>
+        <small id="scenario-copy-status" role="status"></small>
+      </section>
       <button id="create-run" class="btn btn-primary btn-block" disabled hidden>加载并创建运行</button>
       <div class="run-meta-box" hidden><code id="run-id" class="meta-code">-</code></div>
 
@@ -166,6 +173,8 @@
               <option value="rejected">被拒报文</option>
               <option value="other">其他</option>
             </select>
+            <input id="topology-link-source-port" class="topology-node-name" type="text" maxlength="120" placeholder="Source port" aria-label="源端口">
+            <input id="topology-link-target-port" class="topology-node-name" type="text" maxlength="120" placeholder="Target port" aria-label="目标端口">
           </div>
         </div>
         <div class="legend-row">
@@ -204,7 +213,7 @@
         </div>
         <div id="topology-property-panel" class="topology-property-panel" aria-label="拓扑对象属性">
             <span class="topology-property-title">拓扑属性</span>
-          <span class="topology-selection-hint">选择设备后可复制；选中副本可修改名称。副本仅改变拓扑展示。</span>
+          <span class="topology-selection-hint">选中节点可改名、复制或隐藏；选中连线可切换标准样式或隐藏。隐藏只影响拓扑展示。</span>
           <div id="topology-node-properties" class="topology-properties" hidden>
             <span class="topology-property-type" id="topology-selected-type">节点</span>
             <input id="topology-node-name" class="topology-node-name" type="text" maxlength="40" placeholder="节点名称" aria-label="节点名称" disabled>
@@ -263,6 +272,7 @@
 
           <!-- 拓扑连接线图层 -->
           <g id="topo-links" class="topo-links-layer"></g>
+          <g id="topo-native-link-hits" class="topo-native-link-hits-layer"></g>
 
 
           <!-- 报文流粒子动画图层 -->

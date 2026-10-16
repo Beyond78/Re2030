@@ -23,6 +23,23 @@ test('loads and saves layouts independently per scenario', () => {
   assert.deepEqual(editor.snapshot(), { a: { x: 20, y: 30 } });
 });
 
+test('restores a published layout when browser storage has no override', () => {
+  const editor = new TopologyLayoutEditor(memoryStorage());
+  editor.configure('published', { a: { x: 1, y: 2 } }, { a: { width: 90, height: 48 } }, {}, {
+    positions: { a: { x: 24, y: 36 } },
+    sizes: { a: { width: 140, height: 72 } },
+    layerSizes: {},
+    customModules: [{ id: 'copy-a', kind: 'sensor', name: '已发布副本', x: 120, y: 80, width: 110, height: 58 }],
+    customLinks: [{ id: 'link-a', source: 'copy-a', target: 'a', type: 'measurement' }],
+    nodeOverrides: { a: { name: '已发布节点' } },
+  });
+  assert.deepEqual(editor.get('a'), { x: 24, y: 36 });
+  assert.deepEqual(editor.getSize('a'), { width: 140, height: 72 });
+  assert.equal(editor.customModules[0].name, '已发布副本');
+  assert.equal(editor.customLinks[0].type, 'measurement');
+  assert.equal(editor.nodeOverrides.a.name, '已发布节点');
+});
+
 test('commits one drag as a single undo and redo operation', () => {
   const editor = new TopologyLayoutEditor(memoryStorage());
   editor.configure('alpha', { a: { x: 1, y: 2 }, b: { x: 3, y: 4 } });
@@ -216,4 +233,30 @@ test('persists native node display-name overrides and supports undo', () => {
   const restored = new TopologyLayoutEditor(editor.storage);
   restored.configure('alpha', { a: { x: 1, y: 2 } });
   assert.deepEqual(restored.nodeOverrides, { a: { name: '保护装置' } });
+});
+
+test('edits and hides native nodes and links without changing their identities', () => {
+  const storage = memoryStorage();
+  const editor = new TopologyLayoutEditor(storage);
+  editor.configure('alpha', { a: { x: 1, y: 2 }, b: { x: 3, y: 4 } });
+  assert.equal(editor.updateNativeLink('process:mirror', { type: 'mirror' }), true);
+  assert.deepEqual(editor.linkStyles, { 'process:mirror': 'mirror' });
+  assert.equal(editor.hideNativeNode('a'), true);
+  assert.equal(editor.hideNativeLink('process:mirror'), true);
+  assert.deepEqual(editor.hiddenNodes, ['a']);
+  assert.deepEqual(editor.hiddenLinks, ['process:mirror']);
+  assert.equal(editor.undo(), true);
+  assert.deepEqual(editor.hiddenLinks, []);
+  assert.equal(editor.undo(), true);
+  assert.deepEqual(editor.hiddenNodes, []);
+  assert.equal(editor.redo(), true);
+  assert.equal(editor.redo(), true);
+  assert.equal(editor.save(), true);
+
+  const restored = new TopologyLayoutEditor(storage);
+  restored.configure('alpha', { a: { x: 1, y: 2 }, b: { x: 3, y: 4 } });
+  assert.deepEqual(restored.hiddenNodes, ['a']);
+  assert.deepEqual(restored.hiddenLinks, ['process:mirror']);
+  assert.deepEqual(restored.linkStyles, { 'process:mirror': 'mirror' });
+  assert.deepEqual(restored.snapshot(), { a: { x: 1, y: 2 }, b: { x: 3, y: 4 } });
 });

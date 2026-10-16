@@ -60,6 +60,7 @@ GOOSE 报文回放需先导入本地交付包：`python tools/import_message_cor
 | 请求 | 作用 |
 | --- | --- |
 | `GET /api/scenarios` | 列出可选场景 ID、名称与接入模式。 |
+| `DELETE /api/scenarios/{scenario_id}` | 删除场景配置；当前运行中的场景不可删除。 |
 | `POST /api/runs` | 创建运行，返回 `run_id` 与初始状态。 |
 | `POST /api/runs/{run_id}/operations` | 提交启动/暂停/停止或业务操作，返回受理状态；重复 `request_id` 不重复执行。 |
 | `GET /api/runs/{run_id}/views?view=...` | 返回 `system`/`timeline`/`observations`/`recognition`/`defense`/`evaluation` 等视图。 |

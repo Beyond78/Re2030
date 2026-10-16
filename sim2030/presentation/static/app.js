@@ -216,6 +216,14 @@ async function loadScenarios() {
     const li = document.createElement("li");
     li.innerHTML = `<strong>${esc(scenario.name || scenario.scenario_id)}</strong>`;
     li.dataset.scenarioId = scenario.scenario_id;
+    if (document.body.classList.contains("topology-admin-page")) {
+      li.innerHTML += `<button type="button" class="scenario-delete" title="删除场景" aria-label="删除场景 ${esc(scenario.name || scenario.scenario_id)}">删除</button>`;
+      li.querySelector(".scenario-delete").addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        deleteScenario(scenario);
+      });
+    }
     if (scenario.data_available === false) {
       li.setAttribute("aria-disabled", "true");
       li.title = scenario.unavailable_reason;
@@ -246,6 +254,54 @@ async function loadScenarios() {
   setStatus(`已就绪，发现场景 ${state.scenarios.length} 个`);
 }
 
+async function deleteScenario(scenario) {
+  const scenarioId = scenario?.scenario_id;
+  if (!scenarioId) return;
+  const name = scenario.name || scenarioId;
+  if (!window.confirm(`确定删除场景“${name}”吗？删除后无法恢复。`)) return;
+  const payload = await api("DELETE", `/api/scenarios/${encodeURIComponent(scenarioId)}`);
+  if (payload.error) {
+    setStatus(payload.error, true);
+    return;
+  }
+  if (state.selectedScenario === scenarioId) {
+    state.selectedScenario = null;
+    state.activeScenarioId = null;
+  }
+  setStatus(`场景“${name}”已删除`);
+  await loadScenarios();
+}
+
+async function publishScenarioCopy() {
+  const sourceScenarioId = state.selectedScenario;
+  const newScenarioId = $("#scenario-copy-id")?.value.trim();
+  const name = $("#scenario-copy-name")?.value.trim();
+  const status = $("#scenario-copy-status");
+  if (!sourceScenarioId) { if (status) status.textContent = "先选择一个原场景"; return; }
+  if (!newScenarioId || !name) { if (status) status.textContent = "请填写新场景 ID 和名称"; return; }
+  const button = $("#scenario-copy-publish");
+  if (button) button.disabled = true;
+  if (status) status.textContent = "正在发布…";
+  try {
+    const payload = await api("POST", "/api/scenarios/clone", {
+      source_scenario_id: sourceScenarioId,
+      new_scenario_id: newScenarioId,
+      name,
+      topology_layout: topologyLayoutEditor.snapshotLayout(),
+    });
+    if (payload.error) {
+      if (status) status.textContent = payload.error;
+      setStatus(payload.error, true);
+      return;
+    }
+    if (status) status.textContent = "已发布并持久化";
+    setStatus("场景“" + name + "”已发布");
+    await loadScenarios();
+    document.querySelector('[data-scenario-id="' + CSS.escape(newScenarioId) + '"]')?.click();
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
 /* 接收实验条件由场景 JSON 固化：样本决定工况与回放报文，保护判据默认值与样本一致，
    接收策略/处理能力在运行创建后于设备面板上调整，因此创建运行时不再回传 goose_options。 */
 
@@ -1630,10 +1686,10 @@ function updateTopologyEditorControls() {
   $("#topology-layout-save").disabled = !state.systemData?.topology;
   const status = $("#topology-edit-status");
   if (status) status.textContent = state.topologyEditing
-    ? (customLinkMode ? (customLinkSourceId ? "已选起点 · 点击终点" : "连线模式") : selectedTopologyEditKind === "link" ? "已选连线 · 可调样式" : selectedTopologyEditKind === "custom" ? "已选设备副本 · 可改名称" : selectedTopologyEditKind === "native" ? "已选原件 · 可改显示名称或复制" : topologyLayoutEditor.canUndo ? "有未保存修改" : "编辑中 · 拖动节点或选择对象") : "";
+    ? (customLinkMode ? (customLinkSourceId ? "已选起点 · 点击终点" : "连线模式") : ["link", "native-link"].includes(selectedTopologyEditKind) ? "已选连线 · 可调样式" : selectedTopologyEditKind === "custom" ? "已选设备副本 · 可改名称" : selectedTopologyEditKind === "native" ? "已选原件 · 可改显示名称或复制" : topologyLayoutEditor.canUndo ? "有未保存修改" : "编辑中 · 拖动节点或选择对象") : "";
   const copyButton = $("#topology-add-module");
   if (copyButton) {
-    const copyable = selectedTopologyEditId && selectedTopologyEditKind !== "link" && selectedTopologyEditKind !== "layer";
+    const copyable = selectedTopologyEditId && !["link", "native-link", "layer"].includes(selectedTopologyEditKind);
     copyButton.disabled = !state.topologyEditing || !copyable;
   }
   $("#topology-link-toggle")?.toggleAttribute("disabled", !state.topologyEditing);
@@ -1646,12 +1702,17 @@ function updateTopologyEditorControls() {
   const applyName = $("#topology-node-name-apply");
   const deleteSelected = $("#topology-delete-selected");
   const selected = selectedTopologyEditId && selectedTopologyEditKind;
-  const isLink = selectedTopologyEditKind === "link";
+  const isLink = ["link", "native-link"].includes(selectedTopologyEditKind);
   const isCustom = selectedTopologyEditKind === "custom";
   const nodeProperties = $("#topology-node-properties");
   const linkProperties = $("#topology-link-properties");
   const selectionHint = $(".topology-selection-hint");
-  const link = isLink ? topologyLayoutEditor.customLinks.find(item => item.id === selectedTopologyEditId) : null;
+  const nativeObject = ["native", "native-link"].includes(selectedTopologyEditKind);
+  const link = selectedTopologyEditKind === "link"
+    ? topologyLayoutEditor.customLinks.find(item => item.id === selectedTopologyEditId)
+    : selectedTopologyEditKind === "native-link"
+      ? state.networkModel?.cables.find(item => item.id === selectedTopologyEditId)
+      : null;
   nodeProperties?.toggleAttribute("hidden", !selected || isLink);
   linkProperties?.toggleAttribute("hidden", !isLink);
   if (selectionHint) selectionHint.hidden = Boolean(selected);
@@ -1665,8 +1726,19 @@ function updateTopologyEditorControls() {
     nameInput.placeholder = isLink ? "已选连线" : "节点名称";
   }
   if (applyName) applyName.disabled = !state.topologyEditing || !selected || isLink;
-  if (deleteSelected) deleteSelected.disabled = !state.topologyEditing || !selected || selectedTopologyEditKind === "native";
-  $("#topology-link-type") && ($("#topology-link-type").value = link?.type || "wired");
+  if (deleteSelected) deleteSelected.disabled = !state.topologyEditing || !selected;
+  if (deleteSelected) {
+    deleteSelected.textContent = nativeObject ? "隐藏" : "删除";
+    deleteSelected.title = nativeObject ? "仅从拓扑展示隐藏，不影响仿真设备和链路" : "删除选中的自定义模块或展示连线";
+  }
+  $("#topology-link-type") && ($("#topology-link-type").value = selectedTopologyEditKind === "native-link"
+    ? (topologyLayoutEditor.linkStyles[selectedTopologyEditId] || link?.kind || "wired") : link?.type || "wired");
+  const sourcePortInput = $("#topology-link-source-port");
+  const targetPortInput = $("#topology-link-target-port");
+  if (sourcePortInput) sourcePortInput.value = selectedTopologyEditKind === "link" ? (link?.sourcePort || "") : "";
+  if (targetPortInput) targetPortInput.value = selectedTopologyEditKind === "link" ? (link?.targetPort || "") : "";
+  if (sourcePortInput) sourcePortInput.disabled = !state.topologyEditing || selectedTopologyEditKind !== "link";
+  if (targetPortInput) targetPortInput.disabled = !state.topologyEditing || selectedTopologyEditKind !== "link";
   const linkControlsDisabled = !state.topologyEditing || !isLink;
   $("#topology-link-type").disabled = linkControlsDisabled;
   $("#topo-viewport")?.classList.toggle("topology-editing", state.topologyEditing);
@@ -1768,11 +1840,16 @@ function customModuleSize(module) {
 }
 
 function topologyEndpoint(id) {
+  const runtimeId = topologyRuntimeId(id);
   const module = (topologyLayoutEditor.customModules || []).find(item => item.id === id);
-  const position = NODE_COORDINATES[id] || (module ? customModulePosition(module) : null);
+  const position = NODE_COORDINATES[runtimeId] || NODE_COORDINATES[id] || (module ? customModulePosition(module) : null);
   if (!position) return null;
-  const size = NODE_SIZES[id] || (module ? customModuleSize(module) : { width: NODE_SIZE.w, height: NODE_SIZE.h });
+  const size = NODE_SIZES[runtimeId] || NODE_SIZES[id] || (module ? customModuleSize(module) : { width: NODE_SIZE.w, height: NODE_SIZE.h });
   return { x: position.x + size.width / 2, y: position.y + size.height / 2 };
+}
+
+function topologyRuntimeId(id) {
+  return topologyLayoutEditor.customModules.find(module => module.id === id)?.runtimeId || id;
 }
 
 function topologyEditName(id) {
@@ -1793,6 +1870,7 @@ function topologyEditKind(id) {
   if (id === null || id === undefined) return null;
   if (topologyLayoutEditor.customModules.some(module => module.id === id)) return "custom";
   if (topologyLayoutEditor.customLinks.some(link => link.id === id)) return "link";
+  if (state.networkModel?.cables.some(link => link.id === id)) return "native-link";
   if (NODE_COORDINATES[id] || state.networkModel?.assets.some(asset => asset.id === id)) return "native";
   return null;
 }
@@ -1803,10 +1881,10 @@ function selectTopologyEditTarget(id, kind = topologyEditKind(id)) {
   selectedTopologyEditId = id;
   selectedTopologyEditKind = kind;
   document.querySelectorAll(".topology-edit-selected").forEach(node => node.classList.remove("topology-edit-selected"));
-  const node = document.querySelector(`[data-layout-id="${CSS.escape(id)}"], [data-custom-link-id="${CSS.escape(id)}"]`);
+  const node = document.querySelector(`[data-layout-id="${CSS.escape(id)}"], [data-custom-link-id="${CSS.escape(id)}"], [data-native-link-id="${CSS.escape(id)}"]`);
   node?.classList.add("topology-edit-selected");
   updateTopologyEditorControls();
-  setStatus(kind === "link" ? "已选连线，可编辑样式" : kind === "native" ? "已选原件，可改显示名称或复制" : "已选设备副本，可改名或继续复制");
+  setStatus(kind === "link" || kind === "native-link" ? "已选连线，可编辑标准样式或隐藏" : kind === "native" ? "已选原件，可改显示名称、复制或隐藏" : "已选设备副本，可改名或继续复制");
 }
 
 function clearTopologyEditSelection() {
@@ -1826,7 +1904,7 @@ function refreshTopologyAfterEdit(message) {
 }
 
 function applyTopologyNodeName() {
-  if (!state.topologyEditing || !selectedTopologyEditId || selectedTopologyEditKind === "link") return;
+  if (!state.topologyEditing || !selectedTopologyEditId || ["link", "native-link"].includes(selectedTopologyEditKind)) return;
   const input = $("#topology-node-name");
   const value = input?.value.trim();
   if (!value) { setStatus("节点名称不能为空", true); return; }
@@ -1837,9 +1915,16 @@ function applyTopologyNodeName() {
 }
 
 function applyTopologyLinkStyle() {
-  if (!state.topologyEditing || selectedTopologyEditKind !== "link") return;
-  const changed = topologyLayoutEditor.updateCustomLink(selectedTopologyEditId, { type: $("#topology-link-type")?.value });
-  if (changed) refreshTopologyAfterEdit("连线关系类型已更新（使用系统标准样式）");
+  if (!state.topologyEditing || !["link", "native-link"].includes(selectedTopologyEditKind)) return;
+  const type = $("#topology-link-type")?.value;
+  const changed = selectedTopologyEditKind === "link"
+    ? topologyLayoutEditor.updateCustomLink(selectedTopologyEditId, {
+      type,
+      sourcePort: $("#topology-link-source-port")?.value,
+      targetPort: $("#topology-link-target-port")?.value,
+    })
+    : topologyLayoutEditor.updateNativeLink(selectedTopologyEditId, { type });
+  if (changed) refreshTopologyAfterEdit("连线属性已更新");
 }
 
 function deleteSelectedTopologyItem() {
@@ -1848,13 +1933,15 @@ function deleteSelectedTopologyItem() {
   const kind = selectedTopologyEditKind;
   const changed = kind === "custom"
     ? topologyLayoutEditor.removeCustomModule(id)
-    : kind === "link" ? topologyLayoutEditor.removeCustomLink(id) : false;
+    : kind === "link" ? topologyLayoutEditor.removeCustomLink(id)
+      : kind === "native" ? topologyLayoutEditor.hideNativeNode(id)
+        : kind === "native-link" ? topologyLayoutEditor.hideNativeLink(id) : false;
   if (!changed) {
-    if (kind === "native") setStatus("原生设备不能删除，只能修改拓扑显示名称", true);
+    setStatus("该对象已经隐藏，或当前场景没有可编辑状态", true);
     return;
   }
   clearTopologyEditSelection();
-  refreshTopologyAfterEdit(kind === "link" ? "连线已删除" : "模块及其连线已删除");
+  refreshTopologyAfterEdit(kind === "link" || kind === "native-link" ? "连线已从拓扑隐藏，仿真链路仍保留" : kind === "native" ? "节点已从拓扑隐藏，仿真设备仍保留" : "模块及其连线已删除");
 }
 
 function customTopologyIds() {
@@ -1870,6 +1957,8 @@ function renderCustomTopology() {
   linkGroup.querySelectorAll(".topo-custom-link").forEach(node => node.remove());
   hitGroup.replaceChildren();
   (topologyLayoutEditor.customLinks || []).forEach(link => {
+    // Published links are rendered from the runtime topology exactly once.
+    if (link.runtimeId) return;
     const source = topologyEndpoint(link.source);
     const target = topologyEndpoint(link.target);
     if (!source || !target) return;
@@ -1904,7 +1993,8 @@ function renderCustomTopology() {
     linkGroup.appendChild(path);
   });
   nodeGroup.replaceChildren();
-  modules.forEach(module => {
+  // Runtime materialized copies are rendered in the normal device layer.
+  modules.filter(module => !module.runtimeId).forEach(module => {
     const position = customModulePosition(module);
     const size = customModuleSize(module);
     const node = document.createElementNS("http://www.w3.org/2000/svg", "g");
@@ -1975,8 +2065,14 @@ function handleCustomModuleClick(id) {
     (link.source === customLinkSourceId && link.target === id) || (link.source === id && link.target === customLinkSourceId));
   if (!existing) {
     const before = topologyLayoutEditor.snapshotLayout();
-    topologyLayoutEditor.customLinks.push({ id: `custom-link-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, source: customLinkSourceId, target: id,
-      type: $("#topology-link-type")?.value || "wired" });
+  const sourceModule = topologyLayoutEditor.customModules.find(module => module.id === customLinkSourceId);
+  const targetModule = topologyLayoutEditor.customModules.find(module => module.id === id);
+  const sourceDevice = state.systemData?.topology?.devices?.find(item => item.device_id === customLinkSourceId);
+  const targetDevice = state.systemData?.topology?.devices?.find(item => item.device_id === id);
+  topologyLayoutEditor.customLinks.push({ id: `custom-link-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, source: customLinkSourceId, target: id,
+      type: $("#topology-link-type")?.value || "wired",
+      sourcePort: sourceModule?.sourcePort || sourceDevice?.ports && Object.values(sourceDevice.ports)[0] || "",
+      targetPort: targetModule?.sourcePort || targetDevice?.ports && Object.values(targetDevice.ports)[0] || "" });
     topologyLayoutEditor.commitLayout(before);
     renderCustomTopology();
     updateTopologyEditorControls();
@@ -1992,7 +2088,7 @@ const handleTopologyModuleClick = handleCustomModuleClick;
 function copySelectedTopologyNode() {
   if (!state.topologyEditing) return;
   const sourceId = selectedTopologyEditId;
-  if (!sourceId || selectedTopologyEditKind === "link" || selectedTopologyEditKind === "layer") {
+  if (!sourceId || ["link", "native-link", "layer"].includes(selectedTopologyEditKind)) {
     setStatus("先选中一个设备或已有副本，再复制", true);
     return;
   }
@@ -2045,7 +2141,7 @@ function copySelectedTopologyNode() {
   renderCustomTopology();
   refreshEditedTopology();
   updateTopologyEditorControls();
-  setStatus(`已复制“${sourceName}”；副本可独立改名和排布，不参与仿真`);
+  setStatus(`已复制“${sourceName}”；发布后可作为运行设备参与仿真`);
 }
 
 function setCustomLinkMode(enabled) {
@@ -2093,7 +2189,7 @@ function applyScenarioLayout(topo) {
   const initialLayerSizes = Object.fromEntries(initialBands.map((band) => [
     `layer:${band.key}`, { width: Number(band.width), height: Number(band.height) },
   ]));
-  topologyLayoutEditor.configure(scenarioId, NODE_COORDINATES, NODE_SIZES, initialLayerSizes);
+  topologyLayoutEditor.configure(scenarioId, NODE_COORDINATES, NODE_SIZES, initialLayerSizes, layout.editor);
   applyTopologyEditorSnapshot();
 
   const bands = editedLayerBands(layout, devices);
@@ -2256,21 +2352,49 @@ function renderTopologyLinks(force = false) {
   const group = $("#topo-links");
   const model = state.networkModel;
   if (!group || !model) return;
-  const key = JSON.stringify(model.cables);
+  const key = JSON.stringify([
+    model.cables, topologyLayoutEditor.linkStyles, topologyLayoutEditor.hiddenNodes,
+    topologyLayoutEditor.hiddenLinks, selectedTopologyEditId,
+  ]);
   if (!force && group.dataset.renderKey === key) return;
   group.dataset.renderKey = key;
   group.replaceChildren();
+  const hitGroup = $("#topo-native-link-hits");
+  if (hitGroup) hitGroup.replaceChildren();
   for (const cable of model.cables) {
+    if (topologyLayoutEditor.hiddenLinks.includes(cable.id)) continue;
+    if ((cable.endpointIds || []).some(id => topologyLayoutEditor.hiddenNodes.includes(id))) continue;
+    const kind = topologyLayoutEditor.linkStyles[cable.id] || cable.kind;
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", NetworkTopology.pathData(cable.points));
-    path.setAttribute("class", `topo-link ${cable.kind} ${cable.display_group || ""}`);
+    path.setAttribute("class", `topo-link ${kind} ${cable.display_group || ""}`);
     path.setAttribute("fill", "none");
     path.dataset.linkId = cable.id;
-    if (cable.kind === "mirror" || cable.kind === "management") path.setAttribute("marker-end", "url(#monitor-arrow)");
+    path.dataset.nativeLinkId = cable.id;
+    path.classList.toggle("topology-edit-selected", selectedTopologyEditId === cable.id);
+    if (kind === "mirror" || kind === "management") path.setAttribute("marker-end", "url(#monitor-arrow)");
     const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
     title.textContent = cable.title;
     path.appendChild(title);
+    path.addEventListener("click", event => {
+      if (!state.topologyEditing || customLinkMode) return;
+      event.preventDefault();
+      event.stopPropagation();
+      selectTopologyEditTarget(cable.id, "native-link");
+    });
     group.appendChild(path);
+    if (hitGroup && state.topologyEditing) {
+      const hit = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      hit.setAttribute("class", "topo-native-link-hit");
+      hit.setAttribute("d", NetworkTopology.pathData(cable.points));
+      hit.dataset.nativeLinkId = cable.id;
+      hit.addEventListener("pointerdown", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        selectTopologyEditTarget(cable.id, "native-link");
+      });
+      hitGroup.appendChild(hit);
+    }
   }
 }
 
@@ -2279,7 +2403,7 @@ function renderNetworkAssets(data) {
   const model = state.networkModel;
   if (!group || !model) return;
   const key = JSON.stringify([
-    model.assets.map(({ id, kind, network_id, name }) => ({ id, kind, network_id, name, displayName: topologyDisplayName(id, name) })),
+    model.assets.map(({ id, kind, network_id, name }) => ({ id, kind, network_id, name, displayName: topologyDisplayName(id, name), hidden: topologyLayoutEditor.hiddenNodes.includes(id) })),
     model.interfaces.map(({ network_id, interface_id }) => ({ network_id, interface_id })),
   ]);
   if (group.dataset.renderKey !== key) {
@@ -2365,6 +2489,7 @@ function renderNetworkAssets(data) {
     const network = model.networks.find(n => n.id === asset.network_id);
     node.classList.toggle("selected", id === state.selectedNetworkAsset);
     node.classList.toggle("topology-edit-selected", selectedTopologyEditId === id);
+    node.classList.toggle("topo-native-node-hidden", topologyLayoutEditor.hiddenNodes.includes(id));
     node.setAttribute("aria-pressed", String(id === state.selectedNetworkAsset));
     const displayName = topologyDisplayName(id, asset.name);
     node.setAttribute("aria-label", `查看${displayName}`);
@@ -2593,7 +2718,7 @@ function renderTopology(data) {
 
       const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
       const editSelected = selectedTopologyEditId === id;
-      g.setAttribute("class", `topo-node ${statusClass} ${kindClass} ${tamperedClass} ${isSelected ? "selected" : ""} ${editSelected ? "topology-edit-selected" : ""}`);
+      g.setAttribute("class", `topo-node ${statusClass} ${kindClass} ${tamperedClass} ${isSelected ? "selected" : ""} ${editSelected ? "topology-edit-selected" : ""} ${topologyLayoutEditor.hiddenNodes.includes(id) ? "topo-native-node-hidden" : ""}`);
       g.setAttribute("transform", `translate(${coord.x}, ${coord.y})`);
       g.setAttribute("data-device-id", id);
       g.dataset.layoutId = id;
@@ -2670,7 +2795,7 @@ function renderTopology(data) {
       const isSelected = state.selectedDeviceId === id;
       const kindClass = nodeKindClass(dev.device_type);
       const tamperedClass = isSensorTampered(id, mgmt, env) ? "tampered" : "";
-      g.setAttribute("class", `topo-node ${statusClass} ${kindClass} ${tamperedClass} ${isSelected ? "selected" : ""}`);
+      g.setAttribute("class", `topo-node ${statusClass} ${kindClass} ${tamperedClass} ${isSelected ? "selected" : ""} ${topologyLayoutEditor.hiddenNodes.includes(id) ? "topo-native-node-hidden" : ""}`);
 
       const displayName = topologyDisplayName(id, dev.name || id);
       const txtElem = $(`#node-text-${id}`);
@@ -3443,6 +3568,7 @@ function renderOtherView(view, data) {
 }
 function bindEvents() {
   setupTopoInteraction();
+  $("#scenario-copy-publish")?.addEventListener("click", publishScenarioCopy);
   $("#topology-edit-toggle")?.addEventListener("click", () => setTopologyEditing(!state.topologyEditing));
   $("#topology-undo")?.addEventListener("click", () => applyTopologyEditorHistory("undo"));
   $("#topology-redo")?.addEventListener("click", () => applyTopologyEditorHistory("redo"));
@@ -3463,6 +3589,8 @@ function bindEvents() {
   $("#topology-link-toggle")?.addEventListener("click", () => setCustomLinkMode(!customLinkMode));
   $("#topology-node-name-apply")?.addEventListener("click", applyTopologyNodeName);
   $("#topology-link-type")?.addEventListener("change", applyTopologyLinkStyle);
+  $("#topology-link-source-port")?.addEventListener("change", applyTopologyLinkStyle);
+  $("#topology-link-target-port")?.addEventListener("change", applyTopologyLinkStyle);
   $("#topology-delete-selected")?.addEventListener("click", deleteSelectedTopologyItem);
   $("#topology-node-name")?.addEventListener("keydown", event => {
     if (event.key === "Enter") {
