@@ -741,6 +741,34 @@ body {
   line-height: 1.45;
 }
 
+/* 双套量测数值不一致的展示提示：仅数值比对，不代表攻击判定 */
+.monitor-diverge {
+  color: #fca5a5;
+  border-bottom: 1px dotted #ef4444;
+}
+
+.monitor-diverge-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  font-size: 10px;
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.monitor-notice {
+  margin-top: 4px;
+  padding: 3px 6px;
+  font-size: 10.5px;
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.10);
+  border-left: 3px solid #ef4444;
+  border-radius: 3px;
+}
+
 .replay-group {
   display: flex;
   gap: 6px;

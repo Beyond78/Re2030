@@ -22,6 +22,7 @@ from sim2030.base.bay import (
     ConditionMonitor,
     ProtectionDevice,
     OverCurrentProtectionDevice,
+    DifferentialProtectionDevice,
     MeasurementControlDevice,
 )
 from sim2030.base.station import StationControlSystem, TimeService
@@ -54,6 +55,8 @@ DEVICE_TYPES: Dict[str, DeviceFactory] = {
     "protection_device": ProtectionDevice,
     "overcurrent_protection": OverCurrentProtectionDevice,
     "overcurrent_protection_device": OverCurrentProtectionDevice,
+    "differential_protection": DifferentialProtectionDevice,
+    "differential_protection_device": DifferentialProtectionDevice,
     "measurement_control": MeasurementControlDevice,
     "measurement_control_device": MeasurementControlDevice,
     "station_control": StationControlSystem,

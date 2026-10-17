@@ -11,8 +11,8 @@ test('two isolated switches, two mirror feeds and independent reporting cables',
   assert.equal(model.assets.filter(a => a.kind === 'switch').length, 2);
   assert.equal(model.cables.filter(c => c.kind === 'mirror').length, 2);
   assert.equal(model.cables.filter(c => c.kind === 'management').length, 2);
-  assert.equal(model.cables.filter(c => c.kind === 'station').length, 3);
-  assert.equal(model.cables.filter(c => c.kind === 'process').length, 6);
+  assert.equal(model.cables.filter(c => c.kind === 'station').length, 4);
+  assert.equal(model.cables.filter(c => c.kind === 'process').length, 9);
   assert.equal(model.cables.some(c => c.display_group === 'business'), false,
     'business routes must not be drawn a second time over switch access cables');
   assert.equal(model.cables.some(c => c.display_group === 'network-backbone'), false,
@@ -35,15 +35,50 @@ test('two isolated switches, two mirror feeds and independent reporting cables',
   }
 });
 
+test('两套合并单元的量测都经过程网送达保护装置与测控装置', () => {
+  for (const mu of ['mu', 'mu_2']) {
+    for (const [receiver, targetPort] of [['mc', 'mu'], ['prot', 'in'], ['diff_prot', 'in']]) {
+      const linkId = `L-${mu}-${receiver}`;
+      const route = model.routes.get(linkId);
+      assert.ok(route, `${linkId} 应存在`);
+      assert.equal(route.network_id, 'process', `${linkId} 应经过过程网`);
+      const points = topology.messageRoute(model, {
+        sender_id: mu, receiver_id: receiver, source_port: 'out', target_port: targetPort,
+      });
+      assert.deepEqual(points, route.points, `${mu} → ${receiver} 应沿本链路唯一到达`);
+    }
+  }
+});
+
+test('差动保护装置经过程网收两套量测，并经站控网上报保护事件', () => {
+  const inbound = ['L-mu-diff_prot', 'L-mu_2-diff_prot'];
+  for (const linkId of inbound) {
+    assert.equal(model.routes.get(linkId).network_id, 'process', `${linkId} 应经过过程网`);
+  }
+  const trip = model.routes.get('L-diff_prot-brk');
+  assert.equal(trip.network_id, 'process');
+  assert.deepEqual(trip.link.endpoint_b, ['ctl_brk', 'up']);
+  const report = model.routes.get('L-diff_prot-station');
+  assert.equal(report.network_id, 'station', '保护事件应经站控网上报');
+  assert.deepEqual(report.link.endpoint_b, ['station', 'diff_prot']);
+});
+
 test('physical measurements, timing and hardwire controls never enter either switch', () => {
-  for (const id of ['L-ct-mu', 'L-vt-mu', 'L-oil-mu', 'L-time-mu', 'L-ctl-brk-down', 'L-brk-tap']) {
+  const direct = ['L-ct-mu', 'L-vt-mu', 'L-oil-mu', 'L-time-mu', 'L-ct_current_2-mu_2',
+    'L-time_svc_2-mu_2', 'L-ctl-brk-down', 'L-brk-tap'];
+  for (const id of direct) {
     assert.equal(model.routes.get(id).network_id, null, id);
   }
-  assert.equal(model.cables.find(c => c.id === 'L-time-mu').kind, 'timing');
-  const timing = model.routes.get('L-time-mu').points;
-  assert.deepEqual(timing, ['time_svc', 'mu'].map(id => ({
-    x: coordinates[id].x + 45, y: coordinates[id].y + 24,
-  })), 'timing cable must connect directly without intermediate bends');
+  for (const [id, kind, from, to] of [
+    ['L-time-mu', 'timing', 'time_svc', 'mu'],
+    ['L-time_svc_2-mu_2', 'timing', 'time_svc_2', 'mu_2'],
+    ['L-ct_current_2-mu_2', 'measurement', 'ct_current_2', 'mu_2'],
+  ]) {
+    assert.equal(model.cables.find(c => c.id === id).kind, kind, id);
+    assert.deepEqual(model.routes.get(id).points, [from, to].map(device => ({
+      x: coordinates[device].x + 45, y: coordinates[device].y + 24,
+    })), `${id} must connect directly without intermediate bends`);
+  }
 });
 
 test('packets enter only the intended switch and reverse along exactly the same cable', () => {
@@ -101,6 +136,156 @@ test('replay IDS events and optional provider binding remain isolated', () => {
   assert.equal(topology.eventMatches({...idsEvent('span-station'),provider_id:'other'},probe),false);
   assert.equal(topology.summarize({observations:{ids_events:[idsEvent('span-station','alert')]}},probe).status,'alert');
   assert.equal(topology.summarize({observations:{events:[]}},probe).status,'unknown');
+});
+
+test('access ports sit on the switch left edge within its outline', () => {
+  for (const filename of ['substation-live.json', 'substation-attack-demo.json',
+    'substation-em-attack.json', 'substation-network-attack.json']) {
+    const config = JSON.parse(fs.readFileSync(path.join(__dirname, '../scenarios', filename), 'utf8'));
+    const layoutModel = topology.build(config, Object.fromEntries(config.devices.map(d => [d.device_id, d.layout])));
+    for (const network of layoutModel.networks) {
+      const sw = network.switch;
+      const ports = layoutModel.interfaces.filter(p => p.network_id === network.id);
+      assert.equal(ports.length, network.connections.length, `${filename}: ${network.id} 端口数应与接入设备一致`);
+      for (const item of ports) {
+        assert.equal(item.port.x, sw.x, `${filename}: ${item.device_id} 的接入端口应落在交换机左侧边`);
+        assert.ok(item.port.y >= sw.y && item.port.y <= sw.y + sw.height,
+          `${filename}: ${item.device_id} 的接入端口溢出了交换机轮廓`);
+      }
+    }
+  }
+});
+
+test('上下两侧各最多三条分开的线，溢出的并入最外侧那条', () => {
+  for (const network of model.networks) {
+    const sw = network.switch;
+    const centerY = sw.y + sw.height / 2;
+    for (const [side, isAbove] of [['上方', true], ['下方', false]]) {
+      const items = model.interfaces.filter(p => p.network_id === network.id
+        && (p.anchor.y < centerY) === isAbove);
+      const lanes = new Set(items.map(p => p.port.y));
+      assert.ok(lanes.size <= 3, `${network.id} ${side}最多三条线，实际 ${lanes.size} 条`);
+      // 共用同一条线的设备必须是离交换机最近的那批
+      const farthest = items.reduce((max, p) => Math.max(max, Math.abs(p.anchor.x - (sw.x + sw.width / 2))), 0);
+      if (lanes.size < items.length) {
+        const shared = items.filter(p => items.filter(q => q.port.y === p.port.y).length > 1);
+        assert.ok(shared.length >= 2, '超出线条数的接入应共用同一条线');
+        for (const item of shared) {
+          const distance = Math.abs(item.anchor.x - (sw.x + sw.width / 2));
+          assert.ok(distance <= farthest, `${item.device_id} 不应挤占更远设备的线条`);
+        }
+      }
+    }
+  }
+});
+
+test('上方设备越靠近交换机线越靠上，下方设备越靠近交换机线越靠下', () => {
+  for (const network of model.networks) {
+    const sw = network.switch;
+    const centerY = sw.y + sw.height / 2;
+    const centerX = sw.x + sw.width / 2;
+    for (const [isAbove, describe] of [[true, '上方'], [false, '下方']]) {
+      const items = model.interfaces
+        .filter(p => p.network_id === network.id && (p.anchor.y < centerY) === isAbove)
+        .map(p => ({ ...p, distance: Math.abs(p.anchor.x - centerX) }))
+        .sort((a, b) => a.distance - b.distance);
+      // 独占线条的设备（同一 y 只出现一次）按距离由近到远，线位应逐条向外
+      const owners = items.filter(p => items.filter(q => q.port.y === p.port.y).length === 1);
+      for (let i = 1; i < owners.length; i++) {
+        const nearer = owners[i - 1], farther = owners[i];
+        assert.ok(nearer.distance <= farther.distance, `${describe}设备应按距离排序`);
+        if (isAbove) {
+          assert.ok(nearer.port.y < farther.port.y, `${network.id}: 越靠近交换机应越靠上`);
+        } else {
+          assert.ok(nearer.port.y > farther.port.y, `${network.id}: 越靠近交换机应越靠下`);
+        }
+      }
+    }
+  }
+});
+
+test('冷却接口与两台合并单元、风机状态采集装置共用最下面那条线', () => {
+  const process = model.networks.find(n => n.id === 'process');
+  const portY = id => model.interfaces.find(p => p.network_id === 'process' && p.device_id === id).port.y;
+  assert.equal(portY('mu_2'), portY('mu'), '两套合并单元的接入线应共用同一条');
+  assert.equal(portY('ctl_cool'), portY('mu'), '冷却接口的接入线也应并入这条线');
+  assert.equal(portY('fan_condition_monitor'), portY('mu'), '风机状态采集装置的接入线也应并入这条线');
+  assert.notEqual(portY('ctl_tap'), portY('ctl_cool'), '分接机构应独占一条线');
+  assert.notEqual(portY('ctl_brk'), portY('ctl_tap'), '断路器终端与分接机构应各占一条线');
+  assert.ok(portY('ctl_tap') > portY('ctl_brk') && portY('ctl_cool') > portY('ctl_tap'),
+    '下方设备越靠近交换机线越靠下');
+});
+
+test('差动保护装置的过程网接入端口位于交换机从上往下第三条', () => {
+  const process = model.networks.find(n => n.id === 'process');
+  const left = model.interfaces
+    .filter(p => p.network_id === 'process' && p.port.x === process.switch.x)
+    .sort((a, b) => a.port.y - b.port.y);
+  assert.deepEqual(left.slice(0, 3).map(p => p.device_id), ['diff_prot', 'mc', 'prot']);
+});
+
+test('接入端口号自上而下顺序编号，与画面一致', () => {
+  const expected = {
+    station: ['station', 'prot', 'mc', 'diff_prot'],
+    process: ['diff_prot', 'mc', 'prot', 'ctl_brk', 'ctl_tap', 'mu', 'mu_2', 'ctl_cool', 'fan_condition_monitor'],
+  };
+  for (const [id, devices] of Object.entries(expected)) {
+    const rows = model.interfaces.filter(p => p.network_id === id)
+      .sort((a, b) => a.port.y - b.port.y || a.anchor.x - b.anchor.x);
+    assert.deepEqual(rows.map(p => p.device_id), devices, `${id} 接入次序`);
+    assert.deepEqual(rows.map(p => p.switch_port), devices.map((_, i) => `P${i + 1}`), `${id} 端口号`);
+  }
+});
+
+test('接入走线不穿过其它设备的竖线', () => {
+  for (const network of model.networks) {
+    const items = model.interfaces.filter(p => p.network_id === network.id);
+    for (const a of items) {
+      for (const b of items) {
+        if (b.anchor.x <= a.anchor.x) continue;         // 只看 a 右侧设备的竖线
+        const low = Math.min(b.anchor.y, b.port.y), high = Math.max(b.anchor.y, b.port.y);
+        assert.ok(!(a.port.y > low && a.port.y < high),
+          `${network.id}: ${a.device_id} 的横线穿过了 ${b.device_id} 的竖线`);
+      }
+    }
+  }
+});
+
+test('检测节点把检测结论上报安全监测平台', () => {
+  for (const [filename, detectorId] of [['substation-time-attack.json', 'time_detect_node'],
+    ['substation-em-attack.json', 'spectrum_detect_node']]) {
+    const scene = JSON.parse(fs.readFileSync(path.join(__dirname, '../scenarios', filename), 'utf8'));
+    const coords = Object.fromEntries(scene.devices.map(d => [d.device_id, d.layout]));
+    const model = topology.build(scene, coords);
+    const detector = scene.devices.find(d => d.device_id === detectorId);
+    const cable = model.cables.find(c => c.id === `${detectorId}:report`);
+    assert.ok(cable, `${filename}: 检测节点应有上报线`);
+    assert.equal(cable.kind, 'management');
+
+    // 与平台同处上方监测区时从顶边中点出发，否则从右侧边中点出发。
+    const start = cable.points[0];
+    const fromTopEdge = start.x === detector.layout.x + 45 && start.y === detector.layout.y;
+    const fromRightEdge = start.x === detector.layout.x + 90 && start.y === detector.layout.y + 24;
+    assert.ok(fromTopEdge || fromRightEdge,
+      `${filename}: 上报线应从检测节点顶边中点或右侧边中点出发，实际 ${JSON.stringify(start)}`);
+
+    const manager = scene.layout.deployment.manager;
+    assert.equal(cable.points.at(-1).x, manager.x, `${filename}: 上报线应接到安全监测平台左侧边`);
+    assert.ok(cable.points.at(-1).y >= manager.y && cable.points.at(-1).y <= manager.y + manager.height,
+      `${filename}: 上报线应落在平台轮廓内`);
+    // 上报线不得穿过攻击节点或检测节点自身的方框。
+    for (const other of scene.devices) {
+      if (other.device_id === detectorId) continue;
+      const box = { x: other.layout.x, y: other.layout.y, right: other.layout.x + 90, bottom: other.layout.y + 48 };
+      for (let i = 1; i < cable.points.length; i += 1) {
+        const a = cable.points[i - 1], b = cable.points[i];
+        const lowX = Math.min(a.x, b.x), highX = Math.max(a.x, b.x);
+        const lowY = Math.min(a.y, b.y), highY = Math.max(a.y, b.y);
+        const overlaps = lowX < box.right && highX > box.x && lowY < box.bottom && highY > box.y;
+        assert.ok(!overlaps, `${filename}: 上报线不应穿过 ${other.device_id} 的方框`);
+      }
+    }
+  }
 });
 
 test('old scenarios still render original physical links with no invented IDS', () => {

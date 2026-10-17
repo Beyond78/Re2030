@@ -325,6 +325,8 @@ class SensorDevice(Device):
         self.unit: str = self.parameters.get("unit", "")
         self.sample_interval_us: int = int(self.parameters.get("sample_interval_us", 1_000_000))
         self.up_port: str = self.parameters.get("up_port", "up")
+        # 量测通道名：多套互感器测同一电气量时通道名保持同名，供下游合并与保护统一识别。
+        self.channel: str = self.parameters.get("channel") or self.asset_id
         self._next_sample_us: int = 0
 
     def sample(self, physical_input: Dict[str, Any], time_us: int) -> Any:
@@ -359,6 +361,7 @@ class SensorDevice(Device):
                     BusinessType.SAMPLING,
                     {
                         "sensor_id": self.asset_id,
+                        "channel": self.channel,
                         "value": value,
                         "unit": self.unit,
                         "sample_time_us": time_us,
@@ -386,7 +389,9 @@ class AcquisitionDevice(Device):
     def receive(self, message: Message) -> None:
         if message.business_type == BusinessType.SAMPLING:
             payload = message.payload or {}
-            self._latest[message.sender_id] = payload
+            # 按量测通道归集：同一电气量的多套互感器汇入同一通道。
+            channel = payload.get("channel") or message.sender_id
+            self._latest[channel] = payload
         else:
             self._inbox.append(message)
 

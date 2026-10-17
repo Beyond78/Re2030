@@ -5,6 +5,14 @@ const NetworkTopology = (() => {
   const endpointId = (endpoint) => Array.isArray(endpoint) ? endpoint[0] : endpoint;
   const center = (p, size = { width: 90, height: 48 }) => ({ x: p.x + size.width / 2, y: p.y + size.height / 2 });
   const pathData = (points) => points.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
+  // 设备节点尺寸（与前端 NODE_SIZE 一致）：检测节点上报线的起点按它取右侧边中点。
+  const NODE_WIDTH = 90;
+  const NODE_HEIGHT = 48;
+  /* 交换机接入端口：左侧边排列，上方设备与下方设备各最多分开显示三条线，
+     装不下的接入并入该侧最下面那条（与相邻设备共用一条线）。 */
+  const PORT_MARGIN = 12;
+  const PORT_SPACING = 12;
+  const MAX_LANES_PER_SIDE = 3;
 
   function pointAt(points, progress) {
     if (!points.length) return { x: 0, y: 0 };
@@ -38,12 +46,60 @@ const NetworkTopology = (() => {
       const probe = { ...geometry(network.probe), kind: "probe", network_id: network.id };
       assets.push(sw, probe);
       const access = new Map();
-      network.connections.forEach((connection, index) => {
+      // 上方设备与下方设备各最多分开显示 MAX_LANES_PER_SIDE 条线，且线条总数不超过左侧边容量。
+      const capacity = Math.max(1, Math.floor((sw.height - 2 * PORT_MARGIN) / PORT_SPACING) + 1);
+      const centerY = sw.y + sw.height / 2;
+      const entries = network.connections.map((connection) => {
         const coord = coordinates[connection.device_id];
-        if (!coord) return;
+        if (!coord) return null;
+        // 节点可被编辑器缩放：端口锚点按节点实际尺寸等比换算。
         const size = sizes[connection.device_id] || { width: 90, height: 48 };
-        const anchor = { x: coord.x + connection.anchor_x / 90 * size.width, y: coord.y + connection.anchor_y / 48 * size.height };
-        const port = { x: sw.x, y: sw.y + 14 + index * 12 };
+        const anchor = {
+          x: coord.x + connection.anchor_x / 90 * size.width,
+          y: coord.y + connection.anchor_y / 48 * size.height,
+        };
+        return { connection, anchor, side: anchor.y < centerY ? "above" : "below" };
+      }).filter(Boolean);
+
+      // 每侧按 x 升序：index 0 为离交换机最远的设备。
+      const sides = {
+        above: entries.filter((item) => item.side === "above").sort((a, b) => a.anchor.x - b.anchor.x),
+        below: entries.filter((item) => item.side === "below").sort((a, b) => a.anchor.x - b.anchor.x),
+      };
+      const lanes = {
+        above: Math.min(sides.above.length, MAX_LANES_PER_SIDE),
+        below: Math.min(sides.below.length, MAX_LANES_PER_SIDE),
+      };
+      while (lanes.above + lanes.below > capacity) {
+        if (lanes.above > lanes.below) lanes.above -= 1;
+        else if (lanes.below > 0) lanes.below -= 1;
+        else if (lanes.above > 0) lanes.above -= 1;
+        else break;
+      }
+
+      const placements = [];
+      for (const side of ["above", "below"]) {
+        const group = sides[side];
+        if (!group.length) continue;
+        const laneCount = Math.max(1, Math.min(lanes[side], group.length));
+        group.forEach((item, index) => {
+          // 离交换机最远的设备优先独占一条线；靠得近的溢出接入并入该侧最外侧
+          // 那条线（lane 0：上方为最上、下方为最下），与相邻设备共用同一条。
+          const lane = index < laneCount ? laneCount - 1 - index : 0;
+          placements.push({
+            connection: item.connection,
+            anchor: item.anchor,
+            port: {
+              x: sw.x,
+              y: side === "above"
+                ? sw.y + PORT_MARGIN + lane * PORT_SPACING
+                : sw.y + sw.height - PORT_MARGIN - lane * PORT_SPACING,
+            },
+          });
+        });
+      }
+
+      placements.forEach(({ connection, anchor, port }) => {
         const points = [anchor, { x: anchor.x, y: port.y }, port];
         access.set(connection.device_id, points);
         interfaces.push({ ...connection, network_id: network.id, anchor, port });
@@ -84,6 +140,25 @@ const NetworkTopology = (() => {
             { x: manager.x + manager.width, y: manager.y + 20 + index * 18 }],
           title: `${probe.name} / ${probe.management_interface} → ${manager.name}（监测结果上报）` });
       });
+      // 检测节点（如频谱/授时信号检测）的检测结论同样上报安全监测平台：
+      // 与 IDS 管理口一样画成监测上报线。检测节点与平台同处上方监测区时，从节点顶边先
+      // 上行再右接平台左侧边；否则从节点右侧边出发，先横移再竖直到平台的有效高度内。
+      const clampToManager = (value) => Math.min(Math.max(value, manager.y + 12), manager.y + manager.height - 12);
+      for (const device of topology.devices || []) {
+        if (device.device_type !== "spectrum_detector") continue;
+        const coord = coordinates[device.device_id];
+        if (!coord) continue;
+        const inUpperRegion = coord.y <= manager.y + manager.height;
+        const start = inUpperRegion
+          ? { x: coord.x + NODE_WIDTH / 2, y: coord.y }
+          : { x: coord.x + NODE_WIDTH, y: coord.y + NODE_HEIGHT / 2 };
+        const end = { x: manager.x, y: clampToManager(start.y) };
+        const points = inUpperRegion
+          ? [start, { x: start.x, y: end.y }, end]
+          : [start, { x: end.x - 35, y: start.y }, { x: end.x - 35, y: end.y }, end];
+        cables.push({ id: `${device.device_id}:report`, kind: "management", points,
+          title: `${device.name || device.device_id} → ${manager.name}（检测结论上报）` });
+      }
     }
 
     for (const link of links) {
