@@ -17,6 +17,9 @@ VISIBLE_RETENTION_US = 1_000_000
 VISIBLE_LIMIT = 48
 FAULT_STARTS = {"normal": 900000, "forgery": None, "suppression": 1100000, "dos": 900000}
 
+# 跳闸来源：GOOSE 回放帧被接收（goose）/ 保护装置自身判据（protection）/ 人工遥控（control）。
+TRIP_SOURCES = {"goose": "回放跳闸帧", "protection": "保护装置判据", "control": "遥控命令"}
+
 
 def configure_lab(config, options=None):
     """只允许选择已知样本和预设策略，在关闭旧运行前完成参数检查。"""
@@ -27,23 +30,34 @@ def configure_lab(config, options=None):
     if options is not None and not isinstance(options, dict):
         raise ValueError("goose_options 必须是对象")
     options = options or {}
-    if set(options) - {"sample", "policy", "capacity"}:
+    if set(options) - {"sample", "policy", "capacity", "protection"}:
         raise ValueError("未知 GOOSE 实验参数")
     settings = dict(config.layout["goose_lab"])
     settings.update(options)
     for key, allowed in (("sample", SAMPLES), ("policy", ("basic", "validated")), ("capacity", PROFILES)):
         if not isinstance(settings.get(key), str) or settings[key] not in allowed:
             raise ValueError(f"无效的 GOOSE 参数：{key}")
+    if settings.get("protection") is not None and not isinstance(settings["protection"], bool):
+        raise ValueError("无效的 GOOSE 参数：protection")
     sample = settings["sample"]
     settings.update(service_fps=PROFILES[settings["capacity"]], queue_capacity=64,
                     fault_start_us=FAULT_STARTS[sample], fault_current_a=900,
                     trip_deadline_us=400000)
+    # 保护装置自动判据是实验输入之一：默认与样本是否投入故障一致，可显式覆盖。
+    # 它只决定保护装置是否评估本地电气量，不代替任何攻击效果建模。
+    if settings.get("protection") is None:
+        settings["protection_enabled"] = FAULT_STARTS[sample] is not None
+    else:
+        settings["protection_enabled"] = bool(settings.pop("protection"))
     settings["manual_dispatch"] = True
     config.simulation["duration_us"] = 600_000_000
     config.layout["goose_lab"] = settings
     config.layout["packet_replay"]["sample"] = sample
     config.observations["provider_dir"] = str(Path(config.observations["provider_dir"]).parent / sample)
     config.environment["fault"] = {"start_time_us": settings["fault_start_us"], "current_a": 900}
+    for device in config.devices:
+        if device.device_type == "overcurrent_protection":
+            device.parameters["external_trip_replay"] = not settings["protection_enabled"]
 
 
 class GooseLab:
@@ -67,6 +81,7 @@ class GooseLab:
         self.expired = False
         self.max_queue = self.max_delay_us = 0
         self.first_trip_frame = self.trip_dispatched_us = self.opened_us = None
+        self.trip_source = None
         self.fault_started = False
         self.was_closed = True
         self.time_us = -1
@@ -78,6 +93,12 @@ class GooseLab:
         self.manual_frames = {}
         self.manual_pending = []
         self.manual_sent = 0
+        # 攻击报文来源由场景 attack_origin 声明：注入动作和报文 sender_id 都记为该节点。
+        origin = settings.get("attack_origin") or {}
+        self.attack_origin_id = origin.get("asset_id") or "sw-process"
+        self.attack_origin_name = origin.get("name") or "交换机"
+        # 保护判据跳闸走独立通道，只做记录与统计，不进入下面的共享接收队列。
+        self.protection_trips = []
         self.visible_frames = deque(maxlen=VISIBLE_LIMIT)
         self.observed_records, self.observed_points = [], []
         self._observation_batch = []
@@ -96,15 +117,32 @@ class GooseLab:
         elif (suppression_dir / "capture-index.json").is_file():
             self.suppression_capture = GooseCapture(suppression_dir)
 
+    def _record_trip(self, now, source, request_id=""):
+        """记录首次下发跳闸的来源；后续重复跳闸只计数，不覆盖首个来源。"""
+        if self.trip_source is None:
+            self.trip_source = source
+            self.trip_request_id = request_id
+        if self.trip_dispatched_us is None:
+            self.trip_dispatched_us = now
+
     def receive_control(self, message, now, engine):
         """将正常网络控制命令纳入同一 FIFO；不是把它伪装成原始 GOOSE 帧。"""
         terminal = engine.get_device("ctl_brk")
         if (message.receiver_id != "ctl_brk" or message.business_type != BusinessType.COMMAND
                 or message.target_port != terminal.up_port):
             return False
+        payload = message.payload or {}
+        # 保护装置自身判据（含过程层后备）产生的跳闸走独立通道，不占用智能终端共享接收队列；
+        # 与真实工程一致：GOOSE 订阅洪泛影响的是通信跳闸路径，不应让本地保护判据一并失效。
+        if payload.get("protection_trip"):
+            self.protection_trips.append({"time_us": now, "request_id": payload.get("request_id", ""),
+                                          "sample": payload.get("sample_value")})
+            self._record_trip(now, "protection", payload.get("request_id", ""))
+            self._event(now, "command", "保护装置判据越限，经后备通道直接跳闸，未经过接收队列")
+            terminal.receive(message)
+            return True
         number = -len(self.control_messages) - 1
         self.control_messages[number] = message
-        payload = message.payload or {}
         request_id = payload.get("request_id") or message.related_request or message.message_id
         action = payload.get("action_type", "")
         label = {"open": "分闸", "close": "合闸", "trip": "跳闸"}.get(action, action)
@@ -156,7 +194,7 @@ class GooseLab:
             self.manual_sent += 1
             number = len(self.capture.records) + self.manual_sent
             frame = capture.records[index]
-            message = Message(message_id=f"{request_id}:{index_in_batch + 1}", sender_id="sw-process", receiver_id="ctl_brk",
+            message = Message(message_id=f"{request_id}:{index_in_batch + 1}", sender_id=self.attack_origin_id, receiver_id="ctl_brk",
                               business_type="goose_attack", source_port="injection", target_port="up",
                               created_time_us=now, deliver_time_us=now + dt_us,
                               payload={"protocol": "GOOSE", "attack_frame": True, "sample_frame_no": index + 1,
@@ -167,11 +205,11 @@ class GooseLab:
             self.manual_pending.append((message["deliver_time_us"], number))
             self._dispatched_messages.append(message)
         if suppression:
-            label = f"交换机下发 {count} 帧消息抑制报文（状态号投毒）"
+            label = f"{self.attack_origin_name}下发 {count} 帧消息抑制报文（状态号投毒）"
         elif flood:
-            label = f"交换机批量下发 {count} 帧洪泛流量"
+            label = f"{self.attack_origin_name}批量下发 {count} 帧洪泛流量"
         else:
-            label = "交换机手动下发一帧攻击报文"
+            label = f"{self.attack_origin_name}手动下发一帧攻击报文"
         self._event(now, "manual_dispatch", label)
         return {"status": "accepted", "count": count, "batch_id": request_id}
 
@@ -214,7 +252,7 @@ class GooseLab:
         frame = self.frame_record(number)
         manual = self.manual_frames.get(number)
         return {**decision, "label": f"下发 #{number - len(self.capture.records)}" if manual else f"基线 #{number}",
-                "source": "交换机" if manual else "保护装置", "appid": frame["appid"],
+                "source": self.attack_origin_name if manual else "保护装置", "appid": frame["appid"],
                 "stNum": frame["goose"].get("stNum"), "sqNum": frame["goose"].get("sqNum"),
                 "trip": frame["dataset"][0][0], "message_id": manual["message"]["message_id"] if manual else None}
 
@@ -390,7 +428,7 @@ class GooseLab:
             number, arrival = self.cursor + 1, self.capture.times[self.cursor]
             self.cursor += 1
             if self.frame_record(number).get("src_mac") == "00:0c:29:66:00:66":
-                self.decisions[number] = {"frame_no": number, "status": "not_sent", "reason": "样本攻击帧未自动投入，请点击交换机手动下发"}
+                self.decisions[number] = {"frame_no": number, "status": "not_sent", "reason": f"样本攻击帧未自动投入，请点击{self.attack_origin_name}手动下发"}
                 self.pending_records.append({"type": "decision", "time_us": now, **self.decisions[number]})
             else:
                 arrivals.append((arrival, number))
@@ -438,7 +476,7 @@ class GooseLab:
                 related_request=request_id, created_time_us=now,
                 payload={"request_id": request_id, "action_type": "trip", "parameters": {},
                          "goose_frame_no": number, "accepted_time_us": accepted_us}))
-            self.trip_dispatched_us = now
+            self._record_trip(now, "goose", request_id)
             self._event(now, "command", "智能终端下发跳闸，等待断路器执行反馈", number)
         self.pending_trips.clear()
         self.time_us = now
@@ -452,8 +490,11 @@ class GooseLab:
                              and message.payload.get("status") == "completed" and message.created_time_us == now}
             control = next((decision for decision in self.decisions.values()
                             if decision.get("kind") == "control" and decision.get("request_id") in completed_ids), None)
-            self.open_cause = "control" if control else "goose"
-            self._event(now, "breaker", "断路器执行遥控分闸，线路电流与供电功率归零" if control else "断路器实际分闸，线路电流与供电功率归零",
+            self.open_cause = "control" if control else (self.trip_source or "goose")
+            self._event(now, "breaker",
+                        "断路器执行遥控分闸，线路电流与供电功率归零" if control
+                        else "保护装置后备跳闸完成，线路电流与供电功率归零" if self.open_cause == "protection"
+                        else "断路器实际分闸，线路电流与供电功率归零",
                         None if control else self.first_trip_frame)
         self.was_closed = closed
         env = engine._environment.snapshot()
@@ -467,6 +508,15 @@ class GooseLab:
                 is_control = any(decision.get("kind") == "control" and decision.get("request_id") == message.payload.get("action_id")
                                  for decision in self.decisions.values())
                 self._event(now, "feedback", "断路器发出动作完成反馈", None if is_control else self.first_trip_frame)
+
+    def _protection_threshold(self, engine):
+        """读取保护装置当前过流定值，仅用于展示“为什么没动作”，不参与判定。"""
+        device = engine.get_device("prot")
+        parameters = getattr(device, "parameters", {}) or {}
+        try:
+            return float(parameters.get("overcurrent_threshold_a"))
+        except (TypeError, ValueError):
+            return None
 
     def view(self, engine):
         env = engine._environment.snapshot()
@@ -495,8 +545,13 @@ class GooseLab:
                 "subscription_expired": self.expired, "receiver_stNum": self.last_st,
                 "suppression_available": self.suppression_capture is not None,
                 "outcome": outcome, "severity": severity, "breaker_closed": closed,
+                "protection_enabled": bool(self.settings.get("protection_enabled")),
+                "threshold_a": self._protection_threshold(engine),
                 "fault_active": bool(env.get("fault_active")), "fault_duration_us": elapsed if self.fault_started else 0,
                 "opened_us": self.opened_us, "first_trip_frame": self.first_trip_frame,
+                "trip_source": self.trip_source, "open_cause": self.open_cause,
+                "trip_source_label": TRIP_SOURCES.get(self.trip_source or "", ""),
+                "protection_trip_count": len(self.protection_trips),
                 "trip_latency_us": self.opened_us - self.decisions[self.first_trip_frame]["arrival_time_us"] if self.opened_us is not None and self.first_trip_frame and self.open_cause != "control" else None,
                 "trip_dispatched_us": self.trip_dispatched_us,
                 "current_a": env["line_current_a"], "power_mw": env["active_power_mw"],

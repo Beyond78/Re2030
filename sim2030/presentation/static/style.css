@@ -386,6 +386,8 @@ body {
   box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
 }
 
+/* GOOSE 接收实验条件已固化进场景 JSON，运行后在设备面板上调整，左侧不再有实验条件面板。 */
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -1095,7 +1097,8 @@ body {
   filter: drop-shadow(0 0 4px rgba(244, 114, 182, 0.6));
 }
 
-.topo-link.interference {
+.topo-link.interference,
+.topo-link.attack-access {
   stroke: #ef4444;
   stroke-dasharray: 6 4;
   stroke-opacity: 0.95;
@@ -1882,16 +1885,14 @@ body.packet-inspector-open {
 .topo-node.goose-device-fault rect { stroke: #fb7185; stroke-width: 2; fill: #3c2334; }
 @media (max-width: 1100px) { .goose-chart-pair { display: grid; grid-template-columns: 1fr; } }
 
-/* 被控交换机与攻击帧：颜色表示样本来源，不代替接收判定。 */
-.network-asset.goose-compromised > rect { fill: #401e2a; stroke: #fb7185; stroke-width: 2.5; }
-.network-asset.goose-compromised .network-name, .network-asset.goose-compromised .network-status { fill: #fda4af; }
+/* 攻击帧样式：颜色表示样本来源，不代替接收判定。攻击能力在红色攻击节点上，交换机不因此变色。 */
 .send-attack-frame { background: #9f2946; border-color: #fb7185; color: #fff; margin: 8px 0; }
 .send-attack-frame:hover { background: #be3456; }
 .send-suppression-frame { background: #8a5a12; border-color: #fbbf24; }
 .send-suppression-frame:hover { background: #a06a16; }
 .goose-frame-list tr.goose-attack-row td, .goose-frame-list tr.goose-attack-row button { color: #fda4af; }
 
-/* 设备控制面板内展开的设备详情卡片（断路器智能终端 / 交换机，自右侧移入） */
+/* 设备控制面板内展开的设备详情卡片（断路器智能终端 / 交换机 / 网络攻击节点，自右侧移入） */
 .device-control-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; }
 .device-control-card[hidden] { display: none; }
 .device-control-card .panel-header { margin-bottom: 8px; padding-bottom: 6px; }
@@ -1899,6 +1900,11 @@ body.packet-inspector-open {
 .device-card-head h3 { margin: 0; font-size: 13px; font-weight: 600; color: #f1f5f9; }
 .device-card-head span { font-size: 10px; color: var(--text-muted); }
 .switch-control-panel .network-ports td { padding: 5px 4px; }
+
+/* 网络攻击节点面板：红色左边框与交换机、终端面板区分开 */
+.attack-node-panel { border-left: 2px solid #ef4444; }
+.attack-node-panel .device-card-head h3 { color: #fda4af; }
+.attack-node-panel small { display: block; color: #91a9c4; line-height: 1.6; font-size: 10px; }
 
 .goose-receiver-panel { padding-bottom: 4px; }
 .goose-receiver-panel[hidden] { display: none; }

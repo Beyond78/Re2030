@@ -87,10 +87,16 @@ class ProtectionDevice(Device):
 
     def _emit_action(self, action: Dict[str, Any], messages: List[Message], time_us: int) -> None:
         """输出一次保护动作：跳闸命令 + 保护事件，事件保留触发来源与依据。"""
+        # 接收实验据此把保护判据跳闸与 GOOSE 回放跳闸分开处理；触发值随命令带出。
+        sample = action.get("sample") or {}
+        value_key = self.parameters.get("value_key", "current_a")
+        readings = (sample.get("samples") or sample) if isinstance(sample, dict) else {}
         payload = {
             "request_id": action.get("request_id", f"prot-{time_us}"),
             "action_type": action["action_type"],
             "parameters": dict(action.get("parameters") or {}),
+            "protection_trip": True,
+            "sample_value": readings.get(value_key) if isinstance(readings, dict) else None,
         }
         messages.extend(
             self._new_message(self.out_port, BusinessType.COMMAND, payload, time_us, related_request=payload["request_id"])

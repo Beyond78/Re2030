@@ -375,6 +375,22 @@
       }
     },
     {
+      "device_id": "net_attack_node",
+      "layout": {
+        "x": 890,
+        "y": 580
+      },
+      "device_type": "network_attack_source",
+      "layer": "process",
+      "name": "网络攻击节点",
+      "ports": {},
+      "parameters": {
+        "access_switch_id": "sw-process",
+        "attack_type": "network"
+      },
+      "initial_state": {}
+    },
+    {
       "device_id": "time_svc",
       "layout": {
         "x": 600,
@@ -990,7 +1006,9 @@
       "policy": "basic",
       "capacity": "normal",
       "attack_origin": {
-        "asset_id": "sw-process",
+        "asset_id": "net_attack_node",
+        "name": "网络攻击节点",
+        "switch_id": "sw-process",
         "assumed_compromised": true,
         "capability": "frame_injection"
       }

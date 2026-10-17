@@ -1,0 +1,53 @@
+{
+  "archive_sha256": "6d8107b924af2224130dfd985088f272e0632b3e6dc01ac9d0a1d826c3ca6ce2",
+  "actual_file_count": 25,
+  "verified_manifest_entries": 23,
+  "missing_manifest_entries": [
+    "采集口径、payload封装与数据集流转.md"
+  ],
+  "decoder": "provided-reference-decoder-subset",
+  "data_origin": "synthetic",
+  "samples": {
+    "normal": {
+      "frames": 20,
+      "observations": 15,
+      "pcap_matches_log": true,
+      "duration_us": 2800000,
+      "peak_frames_1s": 10,
+      "checks": {}
+    },
+    "forgery": {
+      "frames": 23,
+      "observations": 21,
+      "pcap_matches_log": true,
+      "duration_us": 3900000,
+      "peak_frames_1s": 8,
+      "checks": {
+        "控制块状态号回退": 1,
+        "来源 MAC 偏离正常样本": 3
+      }
+    },
+    "suppression": {
+      "frames": 26,
+      "observations": 20,
+      "pcap_matches_log": true,
+      "duration_us": 3800000,
+      "peak_frames_1s": 11,
+      "checks": {
+        "控制块状态号回退": 1,
+        "来源 MAC 偏离正常样本": 2
+      }
+    },
+    "dos": {
+      "frames": 3024,
+      "observations": 26,
+      "pcap_matches_log": true,
+      "duration_us": 3500000,
+      "peak_frames_1s": 2010,
+      "checks": {
+        "控制块状态号回退": 13,
+        "来源 MAC 偏离正常样本": 3000
+      }
+    }
+  }
+}

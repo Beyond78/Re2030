@@ -54,7 +54,11 @@ async function api(method, path, body) {
   }
   try {
     const response = await fetch(path, options);
-    return await response.json();
+    const payload = await response.json();
+    if (!response.ok && !payload.error) {
+      payload.error = `请求失败（HTTP ${response.status}）`;
+    }
+    return payload;
   } catch (err) {
     console.error("API error:", err);
     return { error: String(err) };
@@ -233,6 +237,9 @@ async function loadScenarios() {
   setStatus(`已就绪，发现场景 ${state.scenarios.length} 个`);
 }
 
+/* 接收实验条件由场景 JSON 固化：样本决定工况与回放报文，保护判据默认值与样本一致，
+   接收策略/处理能力在运行创建后于设备面板上调整，因此创建运行时不再回传 goose_options。 */
+
 const PLAYBACK_RATES = [0.125, 0.25, 0.5, 1, 2, 5];
 const simulationPlayer = new SimulationPlayer({
   send: (action, runId) => api("POST", `/api/runs/${runId}/operations`, {
@@ -285,6 +292,7 @@ async function createRun() {
   state.viewRequest++;
   renderPlaybackControls();
   const scenarioId = state.selectedScenario;
+  let createdRunId = null;
   try {
     if (simulationPlayer.status === "running") {
       if (!await simulationPlayer.command("pause")) return;
@@ -292,6 +300,7 @@ async function createRun() {
     setStatus("正在创建仿真运行...");
     const payload = await api("POST", "/api/runs", { scenario_id: scenarioId });
     if (payload.error) { setStatus(payload.error, true); return; }
+    createdRunId = payload.run_id;
     state.runId = payload.run_id;
     simulationPlayer.bind(payload.run_id, payload);
     state.renderedTopologyOnce = false;
@@ -299,7 +308,14 @@ async function createRun() {
     $("#run-id").title = payload.run_id;
     setStatus(`运行已创建：${payload.run_id}`);
     startPolling();
-    await refreshViews();
+    if (await refreshViews() === false) {
+      setStatus(`运行已创建，但页面数据加载失败（RUN ID: ${payload.run_id}）。请点击刷新重试。`, true);
+    }
+  } catch (error) {
+    console.error("Create run failed:", error);
+    setStatus(createdRunId
+      ? `运行已创建，但拓扑加载失败（RUN ID: ${createdRunId}）：${error.message || error}`
+      : `创建运行失败：${error.message || error}`, true);
   } finally {
     state.loadingRun = false;
     renderPlaybackControls();
@@ -330,6 +346,7 @@ const DEVICE_NAME_MAP = {
   gnss_sat: "授时卫星",
   peer_station: "其他电站",
   em_attack_node: "电磁攻击节点",
+  net_attack_node: "网络攻击节点",
   spectrum_detect_node: "检测节点",
   station: "站端监控系统",
   time_svc: "授时系统",
@@ -468,20 +485,65 @@ function renderSourceRows(sources, badge = "量测") {
 }
 
 /* 设备控制面板：能力描述由后端下发，前端只负责渲染。
-   面板内分三个互斥视图：普通设备控制项(#device-control-body)、
-   断路器智能终端接收详情(#goose-receiver-panel)、交换机详情(#switch-control-panel)。 */
+   面板内分四个互斥视图：普通设备控制项(#device-control-body)、
+   断路器智能终端接收详情(#goose-receiver-panel)、交换机端口(#switch-control-panel)、
+   网络攻击节点下发(#attack-node-panel)。 */
+
+/* 攻击报文来源：场景 layout.goose_lab.attack_origin 声明的攻击节点及其接入交换机。 */
+function attackOrigin(data) {
+  return data?.topology?.layout?.goose_lab?.attack_origin || null;
+}
+
+function attackOriginId(data) {
+  return attackOrigin(data)?.asset_id || "";
+}
+
+/* 接入交换机名称：部署资产不在设备名单里，名称只能从网络模型取。 */
+function attackOriginSwitchName(data) {
+  const origin = attackOrigin(data) || {};
+  const asset = state.networkModel?.assets.find(a => a.id === origin.switch_id);
+  return asset?.name || deviceName(origin.switch_id) || "过程网交换机";
+}
+
+/* 攻击节点名称：优先场景声明，其次设备名单，最后回落节点 id。 */
+function attackOriginName(data) {
+  const origin = attackOrigin(data) || {};
+  return origin.name || deviceName(origin.asset_id) || origin.asset_id || "攻击节点";
+}
+
+/* 攻击节点接入的交换机资产 id：优先场景声明的 switch_id，其次该节点所在的接入网。 */
+function attackOriginSwitchId(data) {
+  const origin = attackOrigin(data) || {};
+  if (origin.switch_id) return origin.switch_id;
+  const network = (data?.topology?.layout?.deployment?.networks || [])
+    .find(n => (n.connections || []).some(c => c.device_id === origin.asset_id));
+  return network?.switch?.id || "";
+}
+
+/* 攻击节点是独立设备而不是部署资产时，交换机上才标注“有攻击节点接入”。 */
+function attackOriginAttached(data) {
+  const origin = attackOriginId(data);
+  if (!origin || data?.packet_capture?.sample === 'normal') return false;
+  if (state.networkModel?.assets.some(a => a.id === origin)) return false;
+  return !!attackOriginSwitchId(data);
+}
+
 function syncDevicePanels(data) {
   const receiver = data?.goose_lab?.receiver;
   const showReceiver = state.selectedDeviceId === "ctl_brk" && !!receiver;
   const selectedAsset = state.networkModel?.assets.find(a => a.id === state.selectedNetworkAsset) || null;
   const showSwitch = !showReceiver && !state.selectedDeviceId && selectedAsset?.kind === "switch";
+  const origin = attackOriginId(data);
+  const showAttack = !showReceiver && !showSwitch && !!data?.goose_lab && !!origin && state.selectedDeviceId === origin;
   const receiverPanel = $("#goose-receiver-panel");
   const switchPanel = $("#switch-control-panel");
+  const attackPanel = $("#attack-node-panel");
   const body = $("#device-control-body");
   if (receiverPanel) receiverPanel.hidden = !showReceiver;
   if (switchPanel) switchPanel.hidden = !showSwitch;
-  if (body) body.hidden = showReceiver || showSwitch;
-  return { showReceiver, showSwitch, selectedAsset };
+  if (attackPanel) attackPanel.hidden = !showAttack;
+  if (body) body.hidden = showReceiver || showSwitch || showAttack;
+  return { showReceiver, showSwitch, showAttack, selectedAsset, attackOriginId: origin };
 }
 
 async function loadDeviceControls(deviceId) {
@@ -496,6 +558,12 @@ async function loadDeviceControls(deviceId) {
     // 断路器智能终端：接收队列配置与处理记录直接在左侧设备面板展开
     renderGooseReceiver(state.systemData);
     $("#goose-receiver-panel")?.scrollIntoView({block: 'nearest'});
+    return;
+  }
+  if (deviceId === attackOriginId(state.systemData || {}) && state.systemData?.goose_lab) {
+    // 网络攻击节点：攻击报文下发直接在左侧设备面板展开
+    renderAttackNodePanel(state.systemData);
+    $("#attack-node-panel")?.scrollIntoView({block: 'nearest'});
     return;
   }
   syncDevicePanels(state.systemData || {});
@@ -783,13 +851,20 @@ function renderGooseLab(data) {
   if (!lab) return;
   const cfg = lab.settings, counts = lab.counts;
   const faultText = cfg.fault_start_us == null ? "无故障投入" : `${(cfg.fault_start_us / 1000000).toFixed(1)} s 投入故障`;
+  const protectionOn = lab.protection_enabled;
+  const threshold = lab.threshold_a ?? 200;
+  const tripText = lab.trip_source_label
+    ? `本次分闸由「${lab.trip_source_label}」触发`
+    : protectionOn && cfg.fault_start_us == null
+      ? `未投入故障：线路电流约 ${lab.current_a.toFixed(0)} A，低于定值 ${threshold} A，保护判据不会动作，也不会自动下发分闸`
+      : protectionOn ? "保护判据已启用，等待越限" : "保护判据已停用（本实验只观察 GOOSE 回放通道）";
   const key = `${data.run_id}:${data.time_us}`;
   if (panel.dataset.key !== key) {
     panel.dataset.key = key;
     const notesOpen = panel.querySelector("details")?.open;
     panel.innerHTML = `<div class="capture-title">设备响应 <span>模型结果</span></div>
       <div class="goose-outcome ${esc(lab.severity)}" role="status">${esc(lab.outcome)}</div>
-      <p class="capture-muted">${esc(data.packet_capture?.name || "")} · ${cfg.policy === 'basic' ? '基础检查' : '入口过滤'} · ${cfg.service_fps} 帧/秒</p>
+      <p class="capture-muted">${esc(data.packet_capture?.name || "")} · ${cfg.policy === 'basic' ? '基础检查' : '入口过滤'} · ${cfg.service_fps} 帧/秒 · 保护判据${protectionOn ? '启用' : '停用'}</p>
       <div class="goose-result-grid">
         <div><small>断路器</small><b>${lab.breaker_closed ? '合闸' : '分闸'}</b></div>
         <div><small>线路供电功率</small><b>${lab.power_mw.toFixed(2)} <em>MW</em></b></div>
@@ -797,10 +872,13 @@ function renderGooseLab(data) {
         <div title="首次接受的跳闸帧到达入口，直到断路器分闸"><small>报文到分闸</small><b>${lab.trip_latency_us == null ? "—" : (lab.trip_latency_us / 1000).toFixed(0)} <em>ms</em></b></div>
       </div>
       <p class="capture-muted">${faultText} · 故障持续 ${(lab.fault_duration_us / 1000).toFixed(0)} ms</p>
+      <p class="capture-muted" id="goose-trip-source">${esc(tripText)}${lab.protection_trip_count ? ` · 保护判据已动作 ${lab.protection_trip_count} 次` : ""}</p>
       <div class="goose-chart-pair">${gooseHistoryChart(lab.history, 'current_a', '线路电流', 'A', '#67e8f9')}${gooseHistoryChart(lab.history, 'power_mw', '供电功率', 'MW', '#c4b5fd')}</div>
       <details class="goose-model-notes" ${notesOpen ? "open" : ""}><summary>实验条件与结果含义</summary>
         <p>${faultText}；故障电流设为 900 A，分闸后归零。功率曲线表示负荷供电功率。</p>
         <p>动作和线路状态按 100 ms 仿真步更新；400 ms 是本实验的故障清除观察时限。</p>
+        <p>过流保护装置读本地电气量判据：启用时按定值（默认 200 A、持续 2 个评估周期）越限即经后备通道跳闸，不占用智能终端共享接收队列；停用时不评估，只观察 GOOSE 回放通道。</p>
+        <p>GOOSE 回放跳闸与站控/测控遥控命令共用智能终端接收队列；队满时分闸命令会被丢弃或延迟。保护判据跳闸不受该队列影响。</p>
         <p>入口过滤在排队前匹配订阅和来源 MAC，未实现密码认证。容量为实验参数，不代表真实交换机性能。</p>
         <p>正常样本帧按原时刻回放；攻击帧每次点击下发一帧。trip=false 不触发合闸。采集结束后可继续下发，订阅可能超时。</p>
         <p>IDS 参考提示来自报文检查，设备响应来自仿真，两者分别展示。</p>
@@ -1109,6 +1187,7 @@ const LINK_TYPE_META = {
   timing: { label: "专用对时", cls: "line-timing", title: "授时系统到采集单元的专用对时连接" },
   wireless: { label: "无线链路", cls: "line-wireless", title: "跨站与星地无线链路（授时卫星↔授时系统、其他电站↔站端监控）" },
   interference: { label: "干扰耦合", cls: "line-interference", title: "攻击节点对目标设备的干扰/欺骗耦合（红色虚线，手动触发）" },
+  "attack-access": { label: "攻击接入", cls: "line-interference", title: "网络攻击节点接入过程网交换机（红色虚线，场景假定已被控制）" },
   hardwire: { label: "控制硬接线", cls: "line-hardwire", title: "控制接口至一次设备电磁线圈的硬接线控制回路" },
   electrical: { label: "电气主回路", cls: "line-elec", title: "一次主干回路高压电气主接线" },
   physical: { label: "热传导耦合", cls: "line-physical", title: "变压器本体热传导至油温计的物理接触测量关系" },
@@ -1433,7 +1512,7 @@ function applyScenarioLayout(topo) {
 
 /* 节点外观类型：攻击/检测节点使用固定方框配色 */
 function nodeKindClass(deviceType) {
-  if (deviceType === "em_attack_source") return "node-kind-attack";
+  if (deviceType === "em_attack_source" || deviceType === "network_attack_source") return "node-kind-attack";
   if (deviceType === "spectrum_detector") return "node-kind-detect";
   return "";
 }
@@ -1534,12 +1613,17 @@ function getDeviceDynamicText(devId, mgmt, env) {
   if (devId === "spectrum_detect_node") {
     return "频谱检测";
   }
+  if (devId === "net_attack_node") {
+    return "[攻击源]";
+  }
 
   return "";
 }
 
 async function sendAttackFrame(flood = false, suppression = false) {
   if (state.sendingAttackFrame || state.loadingRun || simulationPlayer.busy || simulationPlayer.terminal) return;
+  const target = attackOriginId(state.systemData || {});
+  if (!target) { setStatus('当前场景未声明攻击节点', true); return; }
   const count = flood ? Number($("#attack-batch-count")?.value || state.attackBatchCount || 1000) : 1;
   if (flood && (!Number.isInteger(count) || count < 1 || count > 5000)) { setStatus('每批数量须为 1–5000 的整数', true); return; }
   state.attackBatchCount = count === 1 && !flood ? (state.attackBatchCount || 1000) : count;
@@ -1551,7 +1635,7 @@ async function sendAttackFrame(flood = false, suppression = false) {
     if (wasRunning && !await simulationPlayer.command('pause')) return;
     const actionType = suppression ? 'send_suppression_frame' : flood ? 'send_attack_burst' : 'send_attack_frame';
     const response = await api('POST', `/api/runs/${runId}/operations`, {
-      request_id: `attack-frame-${crypto.randomUUID()}`, target_asset_id: 'sw-process', action_type: actionType,
+      request_id: `attack-frame-${crypto.randomUUID()}`, target_asset_id: target, action_type: actionType,
       ...(flood ? { parameters: { count } } : {}),
     });
     if (response.status !== 'accepted') {
@@ -1562,7 +1646,7 @@ async function sendAttackFrame(flood = false, suppression = false) {
     await simulationPlayer.command('start');
     await refreshViews();
     setStatus(suppression ? `已下发 ${response.count ?? 2} 帧消息抑制报文（状态号投毒），可再手动下发跳闸帧观察其被拒绝`
-      : flood ? `已下发 ${count} 帧洪泛流量` : '攻击报文已从交换机发出');
+      : flood ? `已下发 ${count} 帧洪泛流量` : `攻击报文已从${deviceName(target)}发出`);
   } finally {
     state.sendingAttackFrame = false;
     renderPlaybackControls();
@@ -1654,13 +1738,16 @@ function renderNetworkAssets(data) {
     const summary = asset.kind === "probe" ? NetworkTopology.summarize(data, network.probe) : null;
     node.classList.toggle("has-alert", summary?.status === "alert");
     const label = node.querySelector(".network-status");
-    const compromised = asset.id === data.topology?.layout?.goose_lab?.attack_origin?.asset_id && data.packet_capture?.sample !== 'normal';
-    node.classList.toggle("goose-compromised", compromised);
-    if (label) label.textContent = asset.kind === 'switch' ? (compromised ? '已被控制 · 场景假设' : '') : summary?.label || "监测结果汇总";
+    // 攻击能力挂在红色攻击节点上：交换机只做文字说明，不因此变色，也不标成自身被控。
+    if (label) {
+      label.textContent = asset.kind === 'switch'
+        ? (attackOriginAttached(data) && attackOriginSwitchId(data) === asset.id ? '有攻击节点接入' : '')
+        : summary?.label || "监测结果汇总";
+    }
   });
 }
 
-/* 交换机详情：点选交换机后在左侧设备控制面板展开（端口清单 + 攻击报文下发） */
+/* 交换机详情：点选交换机后在左侧设备控制面板展开（仅端口清单与镜像说明） */
 function renderSwitchControlPanel(data) {
   const panel = $("#switch-control-panel");
   if (!panel) return;
@@ -1673,24 +1760,53 @@ function renderSwitchControlPanel(data) {
   const asset = selectedAsset;
   if (!model || asset?.kind !== "switch") return;
   const network = model.networks.find(n => n.id === asset.network_id);
-  const compromised = asset.id === data.topology?.layout?.goose_lab?.attack_origin?.asset_id && data.packet_capture?.sample !== 'normal';
-  const disabled = state.sendingAttackFrame || state.loadingRun || simulationPlayer.busy || simulationPlayer.terminal;
+  const origin = attackOriginId(data);
+  const attached = attackOriginAttached(data) && attackOriginSwitchId(data) === asset.id;
   let html = `<div class="device-card-head"><h3>${esc(asset.name)}</h3><span>${network.connections.length} 个接入端口 · ${esc(network.mirror_port)}</span></div>`;
-  if (compromised) {
-    html += `<button type="button" id="send-attack-frame" class="btn btn-block send-attack-frame" ${disabled ? 'disabled' : ''}>${state.sendingAttackFrame ? '正在下发…' : '下发攻击报文（伪造跳闸帧）'}</button><p class="network-detail-hint">每次发送一帧跳闸报文 · 已下发 ${data.goose_lab?.manual_sent || 0} 帧</p>
-      <button type="button" id="send-suppression-frame" class="btn btn-block send-attack-frame send-suppression-frame" ${disabled || !data.goose_lab?.suppression_available ? 'disabled' : ''}>下发抑制帧（状态号投毒）</button>
-      <small>${data.goose_lab?.suppression_available ? '发送 2 帧高 stNum 的伪装心跳；之后再手动下发跳闸帧，会被终端判为“状态号回退”而拒绝（需基础检查策略）。' : '请先导入消息抑制报文样本。'}</small>
-      <div class="attack-batch-controls"><label for="attack-batch-count">批量数量（帧）</label><input id="attack-batch-count" type="number" min="1" max="5000" step="1" value="${esc(state.attackBatchCount || 1000)}">
-      <button type="button" id="send-attack-burst" class="btn btn-block send-attack-frame" ${disabled || !data.goose_lab?.flood_available ? 'disabled' : ''}>批量下发（DDoS 演示）</button>
-      <small>${data.goose_lab?.flood_available ? '同时下发整批洪泛帧；动画最多显示 24 帧，接收统计包含全部帧。' : '请先导入 DoS 报文样本。'}</small></div>`;
-  }
   html += '<div class="network-detail-hint">端口接入清单</div><table class="network-ports"><tbody>';
   html += network.connections.map(c => `<tr><td>${esc(c.switch_port)}</td><td>${esc(deviceName(c.device_id))}<small>${esc(c.interface_id)}</small></td></tr>`).join("");
   html += `</tbody></table><p class="network-detail-hint">${esc(network.mirror_port)} 镜像全部已列接入端口的收发流量 → ${esc(network.probe.name)} / CAP0</p>`;
   html += '<p class="network-detail-hint">镜像口流量与 IDS 观测事件见右侧「网络安全监测」。</p>';
-  const renderKey = [data.run_id || "", state.selectedNetworkAsset, data.goose_lab?.manual_sent || 0,
-    !!state.sendingAttackFrame, !!disabled, data.goose_lab?.flood_available, data.goose_lab?.suppression_available,
-    state.attackBatchCount || 1000, data.packet_capture?.sample].join("|");
+  if (attached) {
+    html += `<p class="network-detail-hint warning">本场景假定攻击者已接入本交换机（${esc(attackOriginName(data))}）；攻击报文下发已移至该节点面板。</p>`;
+  }
+  const renderKey = [data.run_id || "", state.selectedNetworkAsset, data.packet_capture?.sample, origin, attached].join("|");
+  if (panel.dataset.renderKey !== renderKey) {
+    panel.dataset.renderKey = renderKey;
+    panel.innerHTML = html;
+  }
+}
+
+/* 网络攻击节点：点选红色攻击节点后在左侧设备控制面板展开攻击报文下发 */
+function renderAttackNodePanel(data) {
+  const panel = $("#attack-node-panel");
+  if (!panel) return;
+  const { showAttack } = syncDevicePanels(data);
+  if (!showAttack) {
+    if (panel.dataset.renderKey) { panel.replaceChildren(); delete panel.dataset.renderKey; }
+    return;
+  }
+  const lab = data.goose_lab || {};
+  const name = attackOriginName(data);
+  const switchName = attackOriginSwitchName(data);
+  const disabled = state.sendingAttackFrame || state.loadingRun || simulationPlayer.busy || simulationPlayer.terminal;
+  let html = `<div class="device-card-head"><h3>${esc(name)}</h3><span>接入${esc(switchName)} · 场景假定已被控制</span></div>`;
+  html += `<button type="button" id="send-attack-frame" class="btn btn-block send-attack-frame" ${disabled ? 'disabled' : ''}>下发攻击报文（伪造跳闸帧）</button>
+    <p class="network-detail-hint">每次发送一帧跳闸报文 · 已下发 ${lab.manual_sent || 0} 帧</p>
+    <button type="button" id="send-suppression-frame" class="btn btn-block send-attack-frame send-suppression-frame" ${disabled || !lab.suppression_available ? 'disabled' : ''}>下发抑制帧（状态号投毒）</button>
+    <small>${lab.suppression_available ? '发送 2 帧高 stNum 的伪装心跳；之后再手动下发跳闸帧，会被终端判为“状态号回退”而拒绝（需基础检查策略）。' : '请先导入消息抑制报文样本。'}</small>
+    <div class="attack-batch-controls"><label for="attack-batch-count">批量数量（帧）</label><input id="attack-batch-count" type="number" min="1" max="5000" step="1" value="${esc(state.attackBatchCount || 1000)}">
+    <button type="button" id="send-attack-burst" class="btn btn-block send-attack-frame" ${disabled || !lab.flood_available ? 'disabled' : ''}>批量下发（DDoS 演示）</button>
+    <small>${lab.flood_available ? '同时下发整批洪泛帧；动画最多显示 24 帧，接收统计包含全部帧。' : '请先导入 DoS 报文样本。'}</small>
+    <small>${lab.protection_enabled
+      ? (lab.settings?.fault_start_us == null
+        ? '洪泛只冲击智能终端的 GOOSE 接收队列；本样本未投入故障，线路电流低于保护定值，过流保护装置不会自动下发分闸。'
+        : '洪泛冲击终端接收队列；过流保护装置按本地判据经后备通道跳闸，不受该队列影响。')
+      : '洪泛冲击终端接收队列；本实验已停用保护判据，分闸只可能来自 GOOSE 回放通道或遥控命令。'}</small></div>`;
+  html += `<p class="network-detail-hint">攻击报文由本节点注入过程网，经交换机到达断路器智能终端；逐帧判定见该终端面板与右侧结果。</p>`;
+  const renderKey = [data.run_id || "", attackOriginId(data), lab.manual_sent || 0, !!state.sendingAttackFrame, !!disabled,
+    lab.flood_available, lab.suppression_available, !!lab.protection_enabled,
+    lab.settings?.fault_start_us ?? "", state.attackBatchCount || 1000].join("|");
   if (panel.dataset.renderKey !== renderKey) {
     panel.dataset.renderKey = renderKey;
     panel.innerHTML = html;
@@ -1705,12 +1821,14 @@ function renderNetworkInspector(data) {
   const container = $("#network-inspector-body");
   const model = state.networkModel;
   if (!container || !model) return;
+  // 左侧设备面板的显隐不依赖本场景是否配置采集点：无采集点时也要收起上一场景的面板。
+  renderSwitchControlPanel(data);
+  renderAttackNodePanel(data);
   if (!model.networks.length) {
     container.innerHTML = '<div class="monitor-empty">本场景未配置网络采集点</div>';
     return;
   }
-  renderSwitchControlPanel(data);
-  // 交换机的端口与控制已移至左侧设备控制面板，右侧监测面板聚焦 IDS/平台
+  // 交换机的端口与攻击下发已移至左侧「设备控制面板」，右侧监测面板聚焦 IDS/平台
   let asset = model.assets.find(a => a.id === state.selectedNetworkAsset);
   if (asset?.kind === "switch") {
     asset = model.assets.find(a => a.kind === "probe" && a.network_id === asset.network_id)
@@ -1748,7 +1866,7 @@ function renderNetworkInspector(data) {
     html += model.networks.map(n => `<div class="network-summary-row"><span>${esc(n.name)}</span><b>${esc(NetworkTopology.summarize(data, n.probe).label)}</b></div>`).join("");
   }
   if (unmapped.length) html += `<p class="network-detail-hint warning">${unmapped.length} 条 IDS 事件尚未匹配采集口，请核对 interface_id。</p>`;
-  html += '<p class="network-detail-hint network-scope">交换机端口接入与攻击下发已移至左侧「设备控制面板」；点击图中 IDS 查看观测事件。</p>';
+  html += '<p class="network-detail-hint network-scope">交换机端口接入见左侧「设备控制面板」；攻击报文由红色攻击节点下发，点击图中 IDS 查看观测事件。</p>';
   const renderKey = `${data.run_id || ""}:${html}`;
   if (container.dataset.renderKey !== renderKey) {
     container.dataset.renderKey = renderKey;

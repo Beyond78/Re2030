@@ -294,7 +294,15 @@ class AuxiliaryEquipment(PrimaryEquipment):
         self.state.setdefault("speed_ratio", float(self.parameters.get("initial_speed_ratio", 1.0)))
 
     def physical_outputs(self) -> Dict[str, Any]:
-        return {"running": bool(self.state["running"]), "speed_ratio": float(self.state.get("speed_ratio", 1.0))}
+        running = bool(self.state["running"])
+        speed_ratio = float(self.state.get("speed_ratio", 1.0))
+        outputs = {"running": running, "speed_ratio": speed_ratio}
+        outputs.update({
+            "vibration_mm_s": float(self.parameters.get("vibration_running_mm_s", 0.0)) * speed_ratio if running else 0.0,
+            "motor_current_a": float(self.parameters.get("motor_current_running_a", 0.0)) * speed_ratio if running else 0.0,
+            "rotation_speed_rpm": float(self.parameters.get("rated_speed_rpm", 0.0)) * speed_ratio if running else 0.0,
+        })
+        return outputs
 
     def _apply_action(self, action_type: str, parameters: Dict[str, Any], time_us: int = 0) -> None:
         if action_type == "start":

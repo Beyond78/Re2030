@@ -102,7 +102,9 @@ def validate_deployment(config, errors):
     for link_id, display in direct.items():
         if link_id not in links or link_id in assigned:
             errors.append(f"直连接线未知或已归属交换网络：{link_id}")
-        if not isinstance(display, dict) or display.get("role") not in ("measurement", "timing", "physical"):
+        if not isinstance(display, dict) or display.get("role") not in (
+            "measurement", "timing", "physical", "interference"
+        ):
             errors.append(f"直连接线 {link_id} 类型无效")
             continue
         points = display.get("points", [])

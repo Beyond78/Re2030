@@ -20,7 +20,11 @@
 共用支撑：`application.py`（运行调度）、`records.py`（分流记录/回放）、`evaluation.py`（独立评估）、
 `scenario.py`（场景校验与设备工厂）、`contracts.py`（数据契约）、`constants.py`（常量）。
 
-约束：后端仅用 Python 标准库，无第三方依赖；测试使用 `unittest`。当前 `python -m unittest` **50 项全部通过**。
+约束：后端仅用 Python 标准库，无第三方依赖；测试使用 `unittest`。当前 `python -m unittest discover -s tests -t .`
+共 **103 项**，其中 **102 项通过**；唯一的失败是既有问题（与本次改动无关）：
+`tests/test_network_attack_scene.py::test_scene_validates_and_is_listed` 假设 `substation-network-attack` 会出现在
+`GET /api/scenarios`，但 `presentation/server.py` 早已把它列为隐藏场景，故该断言必然取不到值。排除该文件后
+`Ran 100 tests ... OK`。
 
 ## 2. 目录结构
 
@@ -235,6 +239,64 @@ body 示例：
    - 防御：`defense.enabled=true`，`business_compensation` 对 `tap` 做油温补偿，planned→executing→succeeded；
    - 评估：`overall_score=1.0`，识别 delay=500ms，防御 delay=500ms，主线闭环跑通。
 
+## 6.1 GOOSE 接收实验：保护判据改为可选启用
+
+问题：在 `substation-goose-lab` 里下发 DDoS 后，过流保护装置从不下发分闸。定位到两个叠加原因：
+
+1. `scenarios/substation-goose-lab.json` 把 `prot.parameters.external_trip_replay` 固定为 `true`，`ProtectionDevice.step()`
+   因此在 `sim2030/base/bay.py:76` 提前返回，保护判据从未被执行。
+2. 加载运行时 `goose_options` 始终为空，实际样本恒为场景默认的 `forgery`——该样本不投入故障，
+   线路电流只有约 115 A，低于 200 A 定值。
+
+改动（4 个文件 + 2 处文档）：
+
+- `sim2030/goose_lab.py`：`configure_lab` 接受 `protection` 布尔选项，按样本给默认值（`normal`/`dos`/`suppression`
+  默认启用，`forgery` 默认停用）并写入 `external_trip_replay`；新增 `TRIP_SOURCES`；`receive_control` 把带
+  `protection_trip` 标记的命令直接转交 `ctl_brk`，**不进入共享接收队列**，同时记录 `protection_trips`/`trip_source`；
+  `view()` 新增 `protection_enabled`、`threshold_a`、`trip_source`、`trip_source_label`、`protection_trip_count`。
+- `sim2030/base/bay.py`：保护判据产生的命令载荷增加 `protection_trip: true` 与 `sample_value`，供上式分流。
+- `sim2030/presentation/static/app.js`：设备响应面板显示保护判据状态、定值与"本次分闸由谁触发"。
+- `tests/test_goose_capture.py`：新增 2 个用例（判据默认值 + 显式覆盖 + 非法值拒绝；保护判据跳闸在队满时仍能下发）。
+- 文档：`docs/GOOSE报文接入.md` 新增「两条跳闸通道」与本次修正说明，含真实电网依据与结论边界。
+
+实验结论的姿态：**保护判据后备通道不受接收队列洪泛影响；GOOSE 回放跳闸与遥控命令仍共用该 FIFO**。
+后者是刻意收窄的假设，不能对外表述为"DDoS 会阻塞真实变电站的保护跳闸"。
+
+实验条件（样本 / 接收策略 / 终端处理能力 / 保护判据）后来固化成场景自身的一部分，页面不再有选择器：
+断路器智能终端面板管接收策略与处理能力，网络攻击节点管攻击注入，`layout.goose_lab` 管样本与判据默认值。
+`prot.parameters.external_trip_replay` 在 JSON 里写着 `true`，它正好等于本场景默认样本 `forgery` 的取值
+（`external_trip_replay = not protection_enabled`，未投入故障即停用判据、回放跳闸），但加载时 `configure_lab` 总会按样本重算并覆盖它，
+因此换样本时不需要改这个字段。
+
+## 6.2 GOOSE 网络攻击：攻击能力移到红色攻击节点（本次）
+
+问题：攻击注入能力原先挂在过程网交换机上（点击交换机 → “下发攻击报文”）。但 `sw-process` 是**部署资产而不是设备**
+（不在任何场景的 `devices` 名单里），所以它既没有 `describe_controls()`，也无法成为 `start_attack`/`stop_attack` 的目标；
+把"攻击"当成交换机自身被控，也与"攻击者接入过程网"的实际场景不符。
+
+改动：新增设备类型 `network_attack_source`（`sim2030/base/security.py` 的 `NetworkAttackNode`），在
+`scenarios/substation-goose-lab.json` 里以 `net_attack_node`（红色节点，`layer: process`，坐标 890/580）接入 `sw-process`，
+由 `layout.goose_lab.attack_origin` 声明：
+
+```json
+"attack_origin": {"asset_id": "net_attack_node", "name": "网络攻击节点",
+                  "switch_id": "sw-process", "assumed_compromised": true, "capability": "frame_injection"}
+```
+
+- `sim2030/base/security.py`：`NetworkAttackNode.describe_controls()` 返回三个下发命令（伪造跳闸帧 / 消息抑制帧 / 批量下发）。
+- `sim2030/scenario.py`：`DEVICE_TYPES` 注册 `"network_attack_source"`。
+- `sim2030/goose_lab.py`：注入报文的 `sender_id`、下发事件文案、接收记录来源、未自动下发的提示语都取自 `attack_origin`
+  （缺省回落到 `sw-process`，旧场景与旧运行记录不受影响）。
+- `sim2030/application.py`：攻击下发目标由硬编码的 `"sw-process"` 改为场景声明的攻击节点（`_attack_node_locked()` +
+  `ATTACK_DISPATCH_ACTIONS`）。交换机目标现在返回 `未知目标设备 sw-process`。
+- 前端：`#attack-node-panel` 承载三个攻击按钮与批量输入；`#switch-control-panel` 只剩端口清单与镜像说明；
+  `nodeKindClass` 把 `network_attack_source` 也映射到红色 `node-kind-attack`；`sendAttackFrame` 的目标改为 `attackOriginId()`。
+  交换机**保持常规配色**：`goose-attached` 变体与 `.network-asset.goose-attached` 着色规则已删除，
+  只在节点下方多一行"有攻击节点接入"文字、面板内多一句提示。
+- `network-topology.js`：攻击节点是设备而非部署资产，额外生成一条 `attack-access` 红色虚线（节点顶边垂直上联到交换机底边）。
+- 测试：`test_goose_capture.py` 新增 `test_attack_node_owns_the_injection_actions`、
+  `test_attack_origin_decides_the_frame_source`；`test_network_topology.cjs` 新增攻击接入线用例。
+
 ## 7. 协作规范
 
 - 遵循 `docs/AGENTS.md`：不做无关重构；新增功能必须补充或更新测试；不提交密钥/`.env`。
@@ -245,7 +307,11 @@ body 示例：
 
 ## 8. 验证与已知风险
 
-- 验证命令：`D:\python\python.exe -m unittest discover -s tests -t . -v` → `Ran 61 tests ... OK`。
+- 验证命令：`D:\python\python.exe -m unittest discover -s tests -t .` → `Ran 105 tests`，`errors=1`
+  （既有问题：`test_network_attack_scene.test_scene_validates_and_is_listed`，见第 1 节说明）；
+  排除 `tests/test_network_attack_scene.py` 后全部通过。
+  前端语法：`<bundled node> --check sim2030/presentation/static/{app,simulation-player,network-topology}.js` 均通过；
+  `node --test tests/test_network_topology.cjs` → 11 passed。
 - 演示页面已经完成态势拓扑大屏；使用 `substation-attack-demo` 自动推演到约 1.5s 后可见：
   识别疑似异常（tap 琥珀色）→ 防御动作 planned/executing/succeeded → 攻击结束后恢复正常。
 - `substation-live.json` 未启用 `recognition/defense`，`attacks=[]`，用于长周期正常业务态势；
@@ -256,6 +322,11 @@ body 示例：
   攻击为**演示平面手动触发**（点选攻击节点 → “开始攻击”/“结束攻击”，
   对应 `start_attack`/`stop_attack`），不再按时间自动触发；作用为对 `ct_current` 施加
   `reading_offset=+40A`，电流采样由约 115A 变为约 155A，结束攻击后恢复。
+- `substation-goose-lab.json` 的过程网一侧新增红色“网络攻击节点”（`net_attack_node`，
+  `device_type: network_attack_source`），它是**真实设备**而不是部署资产，因此能被点选、能承载下发命令。
+  点选它 → “下发攻击报文（伪造跳闸帧）”/“下发抑制帧（状态号投毒）”/“批量下发（DDoS 演示）”。
+  它与 `sw-process` 之间的红色虚线由 `network-topology.js` 按 `attack_origin` 生成（`kind: attack-access`），
+  不占用 `deployment.connections` 的端口位，也不进入 `link_ids`。
 - 活动运行的 `time_us` 由步进推进。前端点击“开始推演”会自动按所选速度串行调用 `step`；暂停／停止先停止调度并等待在途步骤完成。`step_once` 在就绪或暂停时原子推进一步，完成后保持暂停，到期则保持 finished。
 - 界面自检：`node tools/ui_screenshot.mjs --url http://127.0.0.1:8765/ --scenario <id> --mode attack|none --out shot.png`
   可无头启动 Edge/Chrome、自动创建运行并截图，脚本同时打印节点/链路/画布/图例/传感器读数用于核对。

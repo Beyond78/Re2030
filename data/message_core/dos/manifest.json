@@ -1,0 +1,75 @@
+{
+  "run_id": "goose-dos-20260928",
+  "scenario": "dos",
+  "capture_point": "substation-attack-demo/CB-TERMINAL-IN",
+  "capture_interface": "cb-terminal 接入交换机镜像口（仿真）",
+  "base_time_utc": 1789084800.0,
+  "frame_count": 3024,
+  "parse_status_counter": {
+    "ok": 3024
+  },
+  "goose_config": {
+    "publisher": "过流保护装置",
+    "subscriber": "断路器智能终端",
+    "gocbRef": "PROT/LLN0$GO$gcbTrip",
+    "datSet": "PROT/LLN0$dsTrip",
+    "goID": "PROT/LLN0$GO$gcbTrip",
+    "confRev": 1,
+    "appid": 12289,
+    "vlan_id": 3,
+    "vlan_pcp": 4,
+    "timeAllowedToLive_ms": 500,
+    "retransmit_ms": [
+      2,
+      4,
+      8,
+      16,
+      32
+    ]
+  },
+  "data_set": [
+    {
+      "index": 1,
+      "name": "trip",
+      "mms_type": "boolean",
+      "meaning": "保护跳闸（本例中的跳闸语义项）"
+    },
+    {
+      "index": 2,
+      "name": "trip_phase",
+      "mms_type": "bit-string",
+      "meaning": "跳闸相别"
+    },
+    {
+      "index": 3,
+      "name": "cb_position",
+      "mms_type": "boolean",
+      "meaning": "断路器位置"
+    },
+    {
+      "index": 4,
+      "name": "protection_pickup",
+      "mms_type": "boolean",
+      "meaning": "保护启动总信号"
+    }
+  ],
+  "retransmit_ms": [
+    2,
+    4,
+    8,
+    16,
+    32
+  ],
+  "files": {
+    "raw_frames": "goose-dos.pcap",
+    "communication_log": "communication-log-dos.jsonl",
+    "labels": "labels-dos.jsonl"
+  },
+  "tools": {
+    "generator": "goose_frame_ref.py（Python 标准库，无第三方依赖）",
+    "reader": "goose_frame_ref.py read（纯 Python 解析 PCAP，无需 tshark）",
+    "note": "本目录只覆盖报文与日志；接收判定、断路器动作与攻击效果需由终端模型与设备记录提供"
+  },
+  "outcome_note": "labels 中 outcome 字段在缺少终端接收判定与断路器记录时保持 unknown，不得据报文推断",
+  "outdir": "runs/goose-demo"
+}

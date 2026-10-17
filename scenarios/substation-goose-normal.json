@@ -1,6 +1,6 @@
 {
   "scenario_id": "substation-goose-normal",
-  "name": "GOOSE 回放 · 正常基线",
+  "name": "变电站 GOOSE 正常基线回放场景",
   "observation_mode": "file_replay",
   "seed": 2030,
   "simulation": {
