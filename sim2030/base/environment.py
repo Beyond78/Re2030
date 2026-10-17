@@ -22,6 +22,9 @@ class OperatingEnvironment:
         ratio        = 1 + tap_step_ratio * (tap_position - nominal_tap)
         bus_voltage  = nominal_voltage_kv * ratio + cap_boost_kv（补偿投入时）
         load_current = load_active_mw * 1000 / (sqrt(3) * bus_voltage)（仅断路器闭合时线路有流）
+        load_pu      = load_active_mw / rated_load_mw（合闸时有负荷；未配置额定负荷时为 0）
+
+    ``load_pu`` 供一次设备热模型使用：没有它，负载温升项恒为 0，冷却启停就对油温没有作用。
     """
 
     def __init__(self, config: Dict[str, Any], seed: Optional[int] = None):
@@ -38,6 +41,7 @@ class OperatingEnvironment:
             "reactive_power_var": 0.0,
             "ambient_temp_c": self.ambient_temp_c,
             "cooling_on": False,
+            "load_pu": 0.0,
         }
 
     def _asset_state(self, physical_outputs: Dict[str, Dict[str, Any]], key: str, field: str, default: Any) -> Any:
@@ -73,6 +77,10 @@ class OperatingEnvironment:
         if fault_active:
             line_current_a = float(fault["current_a"])
 
+        # 负载率：按场景声明的负荷与额定负荷折算；断路器分闸（线路无流）时不产生负载损耗。
+        rated_load_mw = float(self.electrical.get("rated_load_mw", 0.0))
+        load_pu = self.load_active_mw / rated_load_mw if breaker_closed and rated_load_mw > 0 else 0.0
+
         self._shared = {
             "bus_voltage_kv": bus_voltage_kv,
             "line_current_a": line_current_a,
@@ -80,6 +88,7 @@ class OperatingEnvironment:
             "reactive_power_var": self.load_reactive_mvar,
             "ambient_temp_c": self.ambient_temp_c,
             "cooling_on": cooling_on,
+            "load_pu": load_pu,
         }
         if fault:
             self._shared.update(fault_present=fault_present, fault_active=fault_active)

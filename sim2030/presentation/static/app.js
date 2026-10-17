@@ -367,6 +367,10 @@ const DEVICE_NAME_MAP = {
   time_svc_2: "授时系统-2",
   mu_2: "合并单元-2",
   ct_current_2: "电流互感器-2",
+  fan_vibration: "风机振动传感器",
+  fan_current: "风机电流传感器",
+  fan_speed: "风机转速传感器",
+  fan_condition_monitor: "风机状态监测采集装置",
 };
 
 /* 面向人类阅读的监控交互翻译辅助 */
@@ -1575,6 +1579,19 @@ function getDeviceDynamicText(devId, mgmt, env) {
   if (devId === "oil_temp") {
     return sensorReadingText(s, mgmt["tap"]?.state?.oil_temp_c, "℃", 1);
   }
+  // 冷却风机附属传感器：读数经物理耦合取自冷却风机的运行量。
+  if (devId === "fan_vibration") {
+    return sensorReadingText(s, null, "mm/s", 2);
+  }
+  if (devId === "fan_current") {
+    return sensorReadingText(s, null, "A", 2);
+  }
+  if (devId === "fan_speed") {
+    return sensorReadingText(s, null, "r/min", 0);
+  }
+  if (devId === "fan_condition_monitor") {
+    return "[状态监测]";
+  }
   if (devId === "mu" || devId === "mu_2") {
     return "[采集合并]";
   }
@@ -2160,9 +2177,8 @@ function animateParticles(now) {
       const nodeKey = `ifx:${key}`;
       activeNodeKeys.add(nodeKey);
       const group = ensureParticleNode(packetLayer, nodeKey, "attack", "4.2");
-      const ifxX = (p.x1 + (p.x2 - p.x1) * progress).toFixed(1);
-      const ifxY = (p.y1 + (p.y2 - p.y1) * progress).toFixed(1);
-      group.setAttribute("transform", `translate(${ifxX} ${ifxY})`);
+      const point = NetworkTopology.pointAt(p.points, progress);
+      group.setAttribute("transform", `translate(${point.x.toFixed(1)} ${point.y.toFixed(1)})`);
       group.removeAttribute("data-message-id");
       group.removeAttribute("aria-label");
       group.removeAttribute("aria-pressed");
@@ -2301,16 +2317,19 @@ function updateInterferenceFlow(data) {
     const dst = NODE_COORDINATES[toId];
     if (!src || !dst) return;
 
+    // 影响信号沿拓扑上画出的那条链路流动：场景可为干扰路径声明折线，未声明时按设备中心直线。
+    const route = state.networkModel?.routes?.get(link.link_id);
+    const routePoints = route?.points?.length
+      ? (aId === fromId ? route.points : [...route.points].reverse())
+      : [{ x: src.x + 45, y: src.y + 24 }, { x: dst.x + 45, y: dst.y + 24 }];
+
     const count = 4; // 链路上均匀分布的影响信号粒子
     for (let i = 0; i < count; i += 1) {
       const key = `ifx:${link.link_id}:${i}`;
       wanted.add(key);
       if (!interferenceParticles.has(key)) {
         interferenceParticles.set(key, {
-          x1: src.x + 45,
-          y1: src.y + 24,
-          x2: dst.x + 45,
-          y2: dst.y + 24,
+          points: routePoints,
           offset: i / count,
           birthTime: animClock,
           duration: 1400,

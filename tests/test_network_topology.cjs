@@ -12,7 +12,7 @@ test('two isolated switches, two mirror feeds and independent reporting cables',
   assert.equal(model.cables.filter(c => c.kind === 'mirror').length, 2);
   assert.equal(model.cables.filter(c => c.kind === 'management').length, 2);
   assert.equal(model.cables.filter(c => c.kind === 'station').length, 4);
-  assert.equal(model.cables.filter(c => c.kind === 'process').length, 8);
+  assert.equal(model.cables.filter(c => c.kind === 'process').length, 9);
   assert.equal(model.routes.size, scene.links.length);
   assert.equal(model.cables.some(c => /gateway|bus/.test(c.id)), false);
   const rightEdge = Math.max(...scene.layout.layers.map(layer => layer.x + layer.width));
@@ -200,11 +200,12 @@ test('上方设备越靠近交换机线越靠上，下方设备越靠近交换�
   }
 });
 
-test('冷却接口移到最右列后与两台合并单元共用最下面那条线', () => {
+test('冷却接口与两台合并单元、风机状态采集装置共用最下面那条线', () => {
   const process = model.networks.find(n => n.id === 'process');
   const portY = id => model.interfaces.find(p => p.network_id === 'process' && p.device_id === id).port.y;
   assert.equal(portY('mu_2'), portY('mu'), '两套合并单元的接入线应共用同一条');
   assert.equal(portY('ctl_cool'), portY('mu'), '冷却接口的接入线也应并入这条线');
+  assert.equal(portY('fan_condition_monitor'), portY('mu'), '风机状态采集装置的接入线也应并入这条线');
   assert.notEqual(portY('ctl_tap'), portY('ctl_cool'), '分接机构应独占一条线');
   assert.notEqual(portY('ctl_brk'), portY('ctl_tap'), '断路器终端与分接机构应各占一条线');
   assert.ok(portY('ctl_tap') > portY('ctl_brk') && portY('ctl_cool') > portY('ctl_tap'),
@@ -222,7 +223,7 @@ test('差动保护装置的过程网接入端口位于交换机从上往下第�
 test('接入端口号自上而下顺序编号，与画面一致', () => {
   const expected = {
     station: ['station', 'prot', 'mc', 'diff_prot'],
-    process: ['diff_prot', 'mc', 'prot', 'ctl_brk', 'ctl_tap', 'mu', 'mu_2', 'ctl_cool'],
+    process: ['diff_prot', 'mc', 'prot', 'ctl_brk', 'ctl_tap', 'mu', 'mu_2', 'ctl_cool', 'fan_condition_monitor'],
   };
   for (const [id, devices] of Object.entries(expected)) {
     const rows = model.interfaces.filter(p => p.network_id === id)
@@ -241,6 +242,43 @@ test('接入走线不穿过其它设备的竖线', () => {
         const low = Math.min(b.anchor.y, b.port.y), high = Math.max(b.anchor.y, b.port.y);
         assert.ok(!(a.port.y > low && a.port.y < high),
           `${network.id}: ${a.device_id} 的横线穿过了 ${b.device_id} 的竖线`);
+      }
+    }
+  }
+});
+
+test('检测节点把检测结论上报安全监测平台', () => {
+  for (const [filename, detectorId] of [['substation-time-attack.json', 'time_detect_node'],
+    ['substation-em-attack.json', 'spectrum_detect_node']]) {
+    const scene = JSON.parse(fs.readFileSync(path.join(__dirname, '../scenarios', filename), 'utf8'));
+    const coords = Object.fromEntries(scene.devices.map(d => [d.device_id, d.layout]));
+    const model = topology.build(scene, coords);
+    const detector = scene.devices.find(d => d.device_id === detectorId);
+    const cable = model.cables.find(c => c.id === `${detectorId}:report`);
+    assert.ok(cable, `${filename}: 检测节点应有上报线`);
+    assert.equal(cable.kind, 'management');
+
+    // 与平台同处上方监测区时从顶边中点出发，否则从右侧边中点出发。
+    const start = cable.points[0];
+    const fromTopEdge = start.x === detector.layout.x + 45 && start.y === detector.layout.y;
+    const fromRightEdge = start.x === detector.layout.x + 90 && start.y === detector.layout.y + 24;
+    assert.ok(fromTopEdge || fromRightEdge,
+      `${filename}: 上报线应从检测节点顶边中点或右侧边中点出发，实际 ${JSON.stringify(start)}`);
+
+    const manager = scene.layout.deployment.manager;
+    assert.equal(cable.points.at(-1).x, manager.x, `${filename}: 上报线应接到安全监测平台左侧边`);
+    assert.ok(cable.points.at(-1).y >= manager.y && cable.points.at(-1).y <= manager.y + manager.height,
+      `${filename}: 上报线应落在平台轮廓内`);
+    // 上报线不得穿过攻击节点或检测节点自身的方框。
+    for (const other of scene.devices) {
+      if (other.device_id === detectorId) continue;
+      const box = { x: other.layout.x, y: other.layout.y, right: other.layout.x + 90, bottom: other.layout.y + 48 };
+      for (let i = 1; i < cable.points.length; i += 1) {
+        const a = cable.points[i - 1], b = cable.points[i];
+        const lowX = Math.min(a.x, b.x), highX = Math.max(a.x, b.x);
+        const lowY = Math.min(a.y, b.y), highY = Math.max(a.y, b.y);
+        const overlaps = lowX < box.right && highX > box.x && lowY < box.bottom && highY > box.y;
+        assert.ok(!overlaps, `${filename}: 上报线不应穿过 ${other.device_id} 的方框`);
       }
     }
   }

@@ -5,6 +5,9 @@ const NetworkTopology = (() => {
   const endpointId = (endpoint) => Array.isArray(endpoint) ? endpoint[0] : endpoint;
   const center = (p) => ({ x: p.x + 45, y: p.y + 24 });
   const pathData = (points) => points.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
+  // 设备节点尺寸（与前端 NODE_SIZE 一致）：检测节点上报线的起点按它取右侧边中点。
+  const NODE_WIDTH = 90;
+  const NODE_HEIGHT = 48;
   /* 交换机接入端口：左侧边排列，上方设备与下方设备各最多分开显示三条线，
      装不下的接入并入该侧最下面那条（与相邻设备共用一条线）。 */
   const PORT_MARGIN = 12;
@@ -131,6 +134,25 @@ const NetworkTopology = (() => {
             { x: manager.x + manager.width, y: manager.y + 20 + index * 18 }],
           title: `${probe.name} / ${probe.management_interface} → ${manager.name}（监测结果上报）` });
       });
+      // 检测节点（如频谱/授时信号检测）的检测结论同样上报安全监测平台：
+      // 与 IDS 管理口一样画成监测上报线。检测节点与平台同处上方监测区时，从节点顶边先
+      // 上行再右接平台左侧边；否则从节点右侧边出发，先横移再竖直到平台的有效高度内。
+      const clampToManager = (value) => Math.min(Math.max(value, manager.y + 12), manager.y + manager.height - 12);
+      for (const device of topology.devices || []) {
+        if (device.device_type !== "spectrum_detector") continue;
+        const coord = coordinates[device.device_id];
+        if (!coord) continue;
+        const inUpperRegion = coord.y <= manager.y + manager.height;
+        const start = inUpperRegion
+          ? { x: coord.x + NODE_WIDTH / 2, y: coord.y }
+          : { x: coord.x + NODE_WIDTH, y: coord.y + NODE_HEIGHT / 2 };
+        const end = { x: manager.x, y: clampToManager(start.y) };
+        const points = inUpperRegion
+          ? [start, { x: start.x, y: end.y }, end]
+          : [start, { x: end.x - 35, y: start.y }, { x: end.x - 35, y: end.y }, end];
+        cables.push({ id: `${device.device_id}:report`, kind: "management", points,
+          title: `${device.name || device.device_id} → ${manager.name}（检测结论上报）` });
+      }
     }
 
     for (const link of links) {

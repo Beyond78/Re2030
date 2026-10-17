@@ -20,7 +20,8 @@
       "cooling_asset": "cool",
       "tap_step_ratio": 0.02,
       "nominal_tap": 5,
-      "cap_voltage_boost_kv": 0.2
+      "cap_voltage_boost_kv": 0.2,
+      "rated_load_mw": 4.0
     }
   },
   "devices": [
@@ -212,7 +213,12 @@
       "parameters": {
         "control_port": "control",
         "nominal_tap": 5,
-        "initial_oil_temp_c": 40.0
+        "initial_oil_temp_c": 40.0,
+        "thermal": {
+          "max_heat_rise_c": 50.0,
+          "cooling_factor": 0.45,
+          "time_constant_s": 20.0
+        }
       },
       "capabilities": [
         {
@@ -242,7 +248,11 @@
       },
       "parameters": {
         "control_port": "control",
-        "initial_running": false
+        "initial_running": false,
+        "initial_speed_ratio": 1.0,
+        "vibration_running_mm_s": 3.2,
+        "motor_current_running_a": 8.5,
+        "rated_speed_rpm": 1480
       },
       "capabilities": [
         {
@@ -258,6 +268,70 @@
           ]
         }
       ]
+    },
+    {
+      "device_id": "fan_vibration",
+      "layout": {"x": 1005, "y": 588},
+      "device_type": "sensor",
+      "layer": "process",
+      "name": "风机振动传感器",
+      "ports": {
+        "up": "up",
+        "physical": "physical"
+      },
+      "parameters": {
+        "input_key": "vibration_mm_s",
+        "unit": "mm/s",
+        "sample_interval_us": 100000
+      }
+    },
+    {
+      "device_id": "fan_current",
+      "layout": {"x": 1005, "y": 658},
+      "device_type": "sensor",
+      "layer": "process",
+      "name": "风机电流传感器",
+      "ports": {
+        "up": "up",
+        "physical": "physical"
+      },
+      "parameters": {
+        "input_key": "motor_current_a",
+        "unit": "A",
+        "sample_interval_us": 100000
+      }
+    },
+    {
+      "device_id": "fan_speed",
+      "layout": {"x": 1005, "y": 728},
+      "device_type": "sensor",
+      "layer": "process",
+      "name": "风机转速传感器",
+      "ports": {
+        "up": "up",
+        "physical": "physical"
+      },
+      "parameters": {
+        "input_key": "rotation_speed_rpm",
+        "unit": "r/min",
+        "sample_interval_us": 100000
+      }
+    },
+    {
+      "device_id": "fan_condition_monitor",
+      "layout": {"x": 1140, "y": 658},
+      "device_type": "acquisition",
+      "layer": "process",
+      "name": "风机状态监测采集装置",
+      "ports": {
+        "in": "in",
+        "out": "out"
+      },
+      "parameters": {
+        "report_interval_us": 100000,
+        "out_port": "out",
+        "output_business_type": "sampling"
+      }
     },
     {
       "device_id": "comp",
@@ -782,6 +856,87 @@
       "link_type": "physical"
     },
     {
+      "link_id": "L-cool-fan-vibration",
+      "endpoint_a": [
+        "cool",
+        "physical"
+      ],
+      "endpoint_b": [
+        "fan_vibration",
+        "physical"
+      ],
+      "link_type": "physical"
+    },
+    {
+      "link_id": "L-cool-fan-current",
+      "endpoint_a": [
+        "cool",
+        "physical"
+      ],
+      "endpoint_b": [
+        "fan_current",
+        "physical"
+      ],
+      "link_type": "physical"
+    },
+    {
+      "link_id": "L-cool-fan-speed",
+      "endpoint_a": [
+        "cool",
+        "physical"
+      ],
+      "endpoint_b": [
+        "fan_speed",
+        "physical"
+      ],
+      "link_type": "physical"
+    },
+    {
+      "link_id": "L-fan-vibration-monitor",
+      "endpoint_a": [
+        "fan_vibration",
+        "up"
+      ],
+      "endpoint_b": [
+        "fan_condition_monitor",
+        "in"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 200
+      }
+    },
+    {
+      "link_id": "L-fan-current-monitor",
+      "endpoint_a": [
+        "fan_current",
+        "up"
+      ],
+      "endpoint_b": [
+        "fan_condition_monitor",
+        "in"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 200
+      }
+    },
+    {
+      "link_id": "L-fan-speed-monitor",
+      "endpoint_a": [
+        "fan_speed",
+        "up"
+      ],
+      "endpoint_b": [
+        "fan_condition_monitor",
+        "in"
+      ],
+      "link_type": "wired",
+      "parameters": {
+        "delay_us": 200
+      }
+    },
+    {
       "link_id": "L-brk-tap",
       "endpoint_a": [
         "brk",
@@ -886,7 +1041,7 @@
       "title": "外部信号与站间业务",
       "x": 12,
       "y": 44,
-      "width": 975,
+      "width": 1245,
       "height": 94
     },
     {
@@ -894,7 +1049,7 @@
       "title": "站控层",
       "x": 12,
       "y": 150,
-      "width": 975,
+      "width": 1245,
       "height": 94
     },
     {
@@ -902,7 +1057,7 @@
       "title": "间隔层",
       "x": 12,
       "y": 322,
-      "width": 975,
+      "width": 1245,
       "height": 98
     },
     {
@@ -910,7 +1065,7 @@
       "title": "过程层",
       "x": 12,
       "y": 550,
-      "width": 975,
+      "width": 1245,
       "height": 262
     }
   ],
@@ -925,7 +1080,7 @@
         "switch": {
           "id": "sw-station",
           "name": "站控网交换机",
-          "x": 1025,
+          "x": 1295,
           "y": 253,
           "width": 142,
           "height": 64
@@ -933,7 +1088,7 @@
         "probe": {
           "id": "ids-station",
           "name": "站控网 IDS",
-          "x": 1205,
+          "x": 1475,
           "y": 253,
           "width": 155,
           "height": 64,
@@ -1001,7 +1156,7 @@
         "switch": {
           "id": "sw-process",
           "name": "过程网交换机",
-          "x": 1025,
+          "x": 1295,
           "y": 438,
           "width": 142,
           "height": 90
@@ -1009,7 +1164,7 @@
         "probe": {
           "id": "ids-process",
           "name": "过程网 IDS",
-          "x": 1205,
+          "x": 1475,
           "y": 451,
           "width": 155,
           "height": 64,
@@ -1105,6 +1260,16 @@
             "business_ports": [
               "up"
             ]
+          },
+          {
+            "device_id": "fan_condition_monitor",
+            "interface_id": "ETH-PR",
+            "switch_port": "P9",
+            "anchor_x": 45,
+            "anchor_y": 0,
+            "business_ports": [
+              "out"
+            ]
           }
         ],
         "link_ids": [
@@ -1139,6 +1304,76 @@
         "role": "measurement",
         "label": "传感器采集接线"
       },
+      "L-cool-fan-vibration": {
+        "role": "physical",
+        "label": "风机振动测点",
+        "points": [
+          {
+            "x": 960,
+            "y": 752
+          },
+          {
+            "x": 976,
+            "y": 752
+          },
+          {
+            "x": 976,
+            "y": 612
+          },
+          {
+            "x": 1005,
+            "y": 612
+          }
+        ]
+      },
+      "L-cool-fan-current": {
+        "role": "physical",
+        "label": "风机电流测点",
+        "points": [
+          {
+            "x": 960,
+            "y": 752
+          },
+          {
+            "x": 984,
+            "y": 752
+          },
+          {
+            "x": 984,
+            "y": 682
+          },
+          {
+            "x": 1005,
+            "y": 682
+          }
+        ]
+      },
+      "L-cool-fan-speed": {
+        "role": "physical",
+        "label": "风机转速测点",
+        "points": [
+          {
+            "x": 960,
+            "y": 752
+          },
+          {
+            "x": 1005,
+            "y": 752
+          }
+        ]
+      },
+      "L-fan-vibration-monitor": {
+        "role": "measurement",
+        "label": "风机振动采集"
+      },
+      "L-fan-current-monitor": {
+        "role": "measurement",
+        "label": "风机电流采集"
+      },
+      "L-fan-speed-monitor": {
+        "role": "measurement",
+        "label": "风机转速采集"
+      },
       "L-time-mu": {
         "role": "timing",
         "label": "专用对时连接"
@@ -1149,31 +1384,13 @@
       },
       "L-tap-oil": {
         "role": "physical",
-        "label": "变压器与油温传感器的热耦合",
-        "points": [
-          {
-            "x": 240,
-            "y": 776
-          },
-          {
-            "x": 240,
-            "y": 798
-          },
-          {
-            "x": 375,
-            "y": 798
-          },
-          {
-            "x": 375,
-            "y": 776
-          }
-        ]
+        "label": "变压器与油温传感器的热耦合"
       }
     },
     "manager": {
       "id": "security-manager",
       "name": "安全监测平台",
-      "x": 1205,
+      "x": 1475,
       "y": 80,
       "width": 155,
       "height": 72

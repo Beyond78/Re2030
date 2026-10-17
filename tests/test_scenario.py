@@ -53,8 +53,8 @@ class TestLoadScenario(unittest.TestCase):
         config = load_scenario(LIVE_SCENARIO_PATH)
         self.assertEqual(config.scenario_id, "substation-live")
         self.assertEqual(config.name, "变电站正常运行场景")
-        self.assertEqual(len(config.devices), 21)
-        self.assertEqual(len(config.links), 28)
+        self.assertEqual(len(config.devices), 25)
+        self.assertEqual(len(config.links), 34)
 
     def test_load_live_scenario_external_layer(self):
         """外界层应包含授时卫星与其他电站，且均通过无线链路接入站内。"""
@@ -127,19 +127,118 @@ class TestLoadScenario(unittest.TestCase):
         self.assertIn("L-mu_2-prot", process["link_ids"])
 
     def test_live_scenario_cooling_column_at_process_right(self):
-        """冷却接口与冷却风机移到过程层最右列，第二套授时/采集列仍竖直成列。"""
+        """冷却接口与冷却风机占过程层原最右列，其右侧只留给风机状态监测组。"""
         config = load_scenario(LIVE_SCENARIO_PATH)
         devices = {d.device_id: d for d in config.devices}
-        rightmost = max(d.layout["x"] for d in config.devices if d.layer == "process")
-        for device_id in ("ctl_cool", "cool"):
-            self.assertEqual(devices[device_id].layout["x"], rightmost, "冷却支路应位于过程层最右列")
+        self.assertEqual(devices["ctl_cool"].layout["x"], devices["cool"].layout["x"])
         self.assertGreater(devices["cool"].layout["y"], devices["ctl_cool"].layout["y"],
                            "冷却风机应排在冷却系统控制接口下方")
+        right_of = {
+            device.device_id for device in config.devices
+            if device.layer == "process" and device.layout["x"] > devices["ctl_cool"].layout["x"]
+        }
+        self.assertEqual(right_of, {"fan_vibration", "fan_current", "fan_speed", "fan_condition_monitor"},
+                         "冷却列右侧应只有风机状态监测组")
 
-        # 冷却支路让出的列由油温传感器接续，变压器热耦合走线随之收窄到新的油温测点。
-        coupling = config.layout["deployment"]["direct_links"]["L-tap-oil"]["points"]
-        self.assertEqual(coupling[-1]["x"], devices["oil_temp"].layout["x"] + 45)
-        self.assertEqual(coupling[-1]["y"], devices["oil_temp"].layout["y"] + 48)
+        # 变压器与油温传感器同行相邻，热耦合直接画成直线，不再绕到节点下方。
+        coupling = config.layout["deployment"]["direct_links"]["L-tap-oil"]
+        self.assertEqual(coupling["role"], "physical")
+        self.assertNotIn("points", coupling, "相邻成排时热耦合走直线，不需要显式折线")
+        between = [
+            device.device_id for device in config.devices
+            if device.layer == "process"
+            and device.layout["y"] == devices["tap"].layout["y"]
+            and devices["tap"].layout["x"] + 90 <= device.layout["x"] < devices["oil_temp"].layout["x"]
+        ]
+        self.assertEqual(between, [], "变压器与油温传感器之间不应再夹着设备，直线才不会穿过节点")
+
+    def test_live_scenario_fan_condition_monitoring(self):
+        """冷却风机附属传感器与风机状态监测采集装置：位置、读数来源与接入方式。"""
+        config = load_scenario(LIVE_SCENARIO_PATH)
+        devices = {d.device_id: d for d in config.devices}
+        cool = devices["cool"]
+        for device_id, name in (
+            ("fan_vibration", "风机振动传感器"),
+            ("fan_current", "风机电流传感器"),
+            ("fan_speed", "风机转速传感器"),
+            ("fan_condition_monitor", "风机状态监测采集装置"),
+        ):
+            self.assertIn(device_id, devices)
+            self.assertEqual(devices[device_id].name, name)
+            self.assertEqual(devices[device_id].layer, "process")
+            self.assertGreater(devices[device_id].layout["x"], cool.layout["x"], "风机附属设备应在冷却风机右侧")
+
+        # 三台传感器竖直成列，采集装置在它们右侧、与中间那台同排。
+        sensors = ("fan_vibration", "fan_current", "fan_speed")
+        column_x = {devices[device_id].layout["x"] for device_id in sensors}
+        self.assertEqual(len(column_x), 1, "三台风机传感器必须竖直成列")
+        rows = [devices[device_id].layout["y"] for device_id in sensors]
+        self.assertEqual(rows, sorted(rows), "三台风机传感器自上而下排列")
+        self.assertEqual(len(set(rows)), 3)
+        self.assertGreater(devices["fan_condition_monitor"].layout["x"], column_x.pop())
+        self.assertEqual(devices["fan_condition_monitor"].layout["y"], devices["fan_current"].layout["y"])
+
+        # 风机额定参数驱动读数：三台传感器经物理耦合读取风机的振动、电流与转速。
+        self.assertEqual(cool.parameters["rated_speed_rpm"], 1480)
+        self.assertEqual(cool.parameters["vibration_running_mm_s"], 3.2)
+        self.assertEqual(cool.parameters["motor_current_running_a"], 8.5)
+        for device_id, (input_key, unit) in (
+            ("fan_vibration", ("vibration_mm_s", "mm/s")),
+            ("fan_current", ("motor_current_a", "A")),
+            ("fan_speed", ("rotation_speed_rpm", "r/min")),
+        ):
+            self.assertEqual(devices[device_id].parameters["input_key"], input_key)
+            self.assertEqual(devices[device_id].parameters["unit"], unit)
+            self.assertIn("physical", devices[device_id].ports)
+
+        # 物理耦合 + 本地采集接线；采集装置的输出保持悬空，只做本地监测。
+        links = {link.link_id: link for link in config.links}
+        for link_id, sensor in (
+            ("L-cool-fan-vibration", "fan_vibration"),
+            ("L-cool-fan-current", "fan_current"),
+            ("L-cool-fan-speed", "fan_speed"),
+        ):
+            self.assertEqual(links[link_id].link_type, "physical")
+            self.assertEqual(links[link_id].endpoint_a, ("cool", "physical"))
+            self.assertEqual(links[link_id].endpoint_b, (sensor, "physical"))
+        for link_id, sensor in (
+            ("L-fan-vibration-monitor", "fan_vibration"),
+            ("L-fan-current-monitor", "fan_current"),
+            ("L-fan-speed-monitor", "fan_speed"),
+        ):
+            self.assertEqual(links[link_id].endpoint_a, (sensor, "up"))
+            self.assertEqual(links[link_id].endpoint_b, ("fan_condition_monitor", "in"))
+        self.assertEqual(
+            [link.link_id for link in config.links if link.endpoint_a == ("fan_condition_monitor", "out")],
+            [],
+            "采集装置输出未接入业务链路：本场景只做本地监测",
+        )
+
+        # 采集装置接入过程网，端口号接在冷却接口之后；采集接线不占过程网业务。
+        process = next(n for n in config.layout["deployment"]["networks"] if n["id"] == "process")
+        access = next(c for c in process["connections"] if c["device_id"] == "fan_condition_monitor")
+        self.assertEqual(access["switch_port"], "P9")
+        self.assertEqual(access["business_ports"], ["out"])
+        self.assertNotIn("L-fan-vibration-monitor", process["link_ids"])
+
+    def test_live_scenario_cooling_affects_transformer_heat(self):
+        """冷却风机启停要能作用到油温：声明额定负荷与足够短的热时间常数。"""
+        config = load_scenario(LIVE_SCENARIO_PATH)
+        devices = {d.device_id: d for d in config.devices}
+        self.assertEqual(config.environment["electrical"]["rated_load_mw"], 4.0)
+        self.assertEqual(config.environment["electrical"]["cooling_asset"], "cool")
+        thermal = devices["tap"].parameters["thermal"]
+        self.assertEqual(thermal["max_heat_rise_c"], 50.0)
+        self.assertEqual(thermal["cooling_factor"], 0.45)
+        self.assertLessEqual(thermal["time_constant_s"], 30.0, "热时间常数需足够短，演示中才看得出变化")
+
+        # 负载率 0.5 时的稳态油温：不通风机 42.5 ℃、通风机 35.625 ℃。
+        load_pu = config.environment["load_active_mw"] / config.environment["electrical"]["rated_load_mw"]
+        rise = thermal["max_heat_rise_c"] * load_pu ** 2
+        self.assertAlmostEqual(config.environment["ambient_temp_c"] + rise, 42.5, places=6)
+        self.assertAlmostEqual(
+            config.environment["ambient_temp_c"] + rise * thermal["cooling_factor"], 35.625, places=6
+        )
 
     def test_live_scenario_differential_protection(self):
         """差动保护装置：间隔层保护，接收两套合并单元量测并控制断路器智能终端。"""
