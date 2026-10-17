@@ -45,6 +45,7 @@ Re2030/
 ├── scenarios/substation-live.json      # 变电站长周期运行态势场景
 ├── scenarios/substation-attack-demo.json # 攻防演示场景（攻击→识别→防御→评估闭环）
 ├── scenarios/substation-em-attack.json # 电磁攻击场景（电流互感器读数篡改 + 频谱检测节点）
+├── scenarios/substation-time-attack.json # 授时攻击场景（针对授时系统-2 的时钟欺骗 + 检测节点）
 ├── scenarios/observations/           # 文件回放观测数据（events.jsonl）
 ├── tests/                    # unittest 回归测试
 ├── docs/                     # 设计文档（含接口规范）
@@ -197,8 +198,12 @@ body 示例：
 
 前端 `sim2030/presentation/static/` 已完成态势拓扑页，可直接“双击即跑”，无构建工具：
 
-1. **拓扑图**：内联 SVG 按 `external / station / bay / process` 四层绘制 17 个设备与 19 条链路；链路端点取自 `topology.links[].endpoint_a[0]` → `endpoint_b[0]`。
-   “外界层”位于站控层之上：授时卫星（`gnss_sat`）无线接入授时系统，其他电站（`peer_station`）无线接入站端监控。
+1. **拓扑图**：内联 SVG 按 `external / station / bay / process` 四层绘制 25 个设备与 34 条链路；链路端点取自 `topology.links[].endpoint_a[0]` → `endpoint_b[0]`。
+   “外界层”位于站控层之上：授时卫星（`gnss_sat`）无线接入两套授时系统，其他电站（`peer_station`）无线接入站端监控。
+   授时/采集链路为并列两列：`time_svc`+`mu`+`ct_current` 与 `time_svc_2`+`mu_2`+`ct_current_2`，分别在 `x=465` 与 `x=735`；卫星居中（`x=600`）同时向两套授时系统广播时间基准。冷却系统控制接口与冷却风机占 `x=870`。
+   冷却风机右侧是**风机状态监测组**：风机振动/电流/转速三台传感器竖排于 `x=1005`，经物理耦合读取冷却风机的运行量（`vibration_mm_s`、`motor_current_a`、`rotation_speed_rpm`，额定 3.2 mm/s、8.5 A、1480 r/min），三路采集接线汇入 `fan_condition_monitor`（风机状态监测采集装置，`x=1140`）；该采集装置接过程网 P9，但输出未接业务链路，只做本地监测（与传感器攻击场景一致），因此测控装置的量测来源仍是两套合并单元。
+   冷却风机启停会**实际改变变压器油温**：工况按 `electrical.rated_load_mw=4.0` 给出负载率（当前负荷 2.0 MW → 0.5），变压器热参数 `thermal{max_heat_rise_c:50, cooling_factor:0.45, time_constant_s:20}` 决定温升与响应速度——不通风机稳态约 **42.5 ℃**，通风机约 **35.6 ℃**，时间常数 20 s 便于演示中直接看出变化（此前 `load_pu` 无来源，冷却对油温实际没有作用）。
+   两套合并单元都经过程网把量测送往测控装置、过流保护装置与差动保护装置：测控装置按来源分组上送（`sources`），站端如实分列显示并提示“两套量测不一致”；过流保护逐来源判断，任一来源持续越限即跳闸并标注触发来源；差动保护（`diff_prot`，间隔层）比较两套量测的绝对差，越限即跳闸，整定值可在演示平面修改。`ct_current_2` 通过 `channel: "ct_current"` 与首套共用同一量测通道名。
 2. **设备状态可视**：
    - `effects` 非空 → 红色（受攻击作用影响）
    - 出现在 `recognition[].target_asset_ids / affected_asset_ids` → 琥珀色（疑似异常）
@@ -320,6 +325,16 @@ body 示例：
   攻击为**演示平面手动触发**（点选攻击节点 → “开始攻击”/“结束攻击”，
   对应 `start_attack`/`stop_attack`），不再按时间自动触发；作用为对 `ct_current` 施加
   `reading_offset=+40A`，电流采样由约 115A 变为约 155A，结束攻击后恢复。
+- `substation-time-attack.json` 已**与基准场景同步**（同样的 25 台设备/34 条链路、复数授时链、差动保护、
+  风机状态监测组与版式），额外新增：
+  - “攻击节点”（`time_attack_node`，`em_attack_source`，站控层 `x=1005`）放在**授时系统-2 右侧**同一排，与授时系统-2 留出两列间距，
+    `target_asset_id: time_svc_2`、`effect_type: timing_offset`（+100 ms）；红色虚线干扰链路
+    `L-time_attack-time_svc_2` 接到 `time_svc_2.gnss`，走线不额外声明——两个节点同排，连线就是一条水平直线
+    （`y=204`），正好从检测节点（底边 `y=198`）下方 6 px 穿过。手动触发后授时系统-2 的
+    `sync_state` 变为 `spoofed`、`timing_offset_us=100000`，第一套授时系统不受影响；结束攻击后恢复。
+  - “检测节点”（`time_detect_node`，`spectrum_detector`，站控层 `x=870, y=150`）放在两个节点之间的空档，
+    **顶部与站控层分层带顶部对齐**（占 `y=150..198`，水平居中在连线中点上方）；并在 `network-topology.js` 中
+    按“检测节点 → 安全监测平台”生成一条监测上报线（`<device>:report`，与 IDS 管理口同一样式），表示检测结论上报平台。
 - `substation-goose-lab.json` 的过程网一侧新增红色“网络攻击节点”（`net_attack_node`，
   `device_type: network_attack_source`），它是**真实设备**而不是部署资产，因此能被点选、能承载下发命令。
   点选它 → “下发攻击报文（伪造跳闸帧）”/“下发抑制帧（状态号投毒）”/“批量下发（DDoS 演示）”。
