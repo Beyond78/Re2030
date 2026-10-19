@@ -1,17 +1,20 @@
 """声波演示的独立数学检查、闭环与断路反例。全部不依赖真实设备。"""
 import cmath
+import copy
 import hashlib
 import json
 import math
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
-from acoustic_demo.application import AcousticApplication, SCENARIO
+from acoustic_demo.application import AcousticApplication, AcousticEngine, AcousticStation, SCENARIO
 from acoustic_demo.model import AcousticResponse, DemoModel, DATA
 from acoustic_demo.server import AcousticServer
 from sim2030.records import RunReader
 from sim2030.presentation.server import PresentationServer
+from sim2030.scenario import load_scenario
 
 
 class TestAcousticMath(unittest.TestCase):
@@ -93,6 +96,27 @@ class TestAcousticMath(unittest.TestCase):
         self.assertGreater(model.oil_c,60)
         self.assertLess(model.oil_c,85)  # 停机后仍有自然散热，平衡温度 85 ℃。
 
+    def test_accelerated_heat_has_20s_tau_and_unscaled_comparison(self):
+        fast=DemoModel({'time_scale':360})
+        slow=DemoModel()
+        fast.set_power(False,0)
+        slow.set_power(False,0)
+        fast.advance(12.5)
+        slow.advance(12.5)
+        self.assertEqual(fast.natural_tau_s,20)
+        self.assertEqual(fast.reference_natural_tau_s,7200)
+        self.assertEqual(fast.effective_capacity_j_per_k,10000)
+        self.assertGreater(fast.oil_sensor_c-55,1)
+        self.assertLess(slow.oil_sensor_c-55,.1)
+        self.assertAlmostEqual(fast.oil_original_sensor_c,slow.oil_sensor_c,places=10)
+        self.assertAlmostEqual(fast.current_a,slow.current_a,places=12)
+        self.assertAlmostEqual(fast.speed_ratio,slow.speed_ratio,places=12)
+
+    def test_thermal_scale_must_be_finite_and_positive(self):
+        for scale in (0,-1,float('nan'),float('inf')):
+            with self.subTest(scale=scale), self.assertRaises(ValueError):
+                DemoModel({'time_scale':scale})
+
 
 class TestAcousticLoop(unittest.TestCase):
     def setUp(self):
@@ -127,6 +151,10 @@ class TestAcousticLoop(unittest.TestCase):
         self.advance(12)
         self.assertFalse(self.app.acoustic.powered)
         self.assertTrue(self.app.acoustic.trip_latched)
+        view=self.app.get_view('acoustic')
+        oil_state=self.app.engine.get_device('oil_temp').state
+        self.assertEqual(view['oil_c'],oil_state['last_value'])
+        self.assertEqual(view['oil_sample_time_s'],oil_state['last_sample_time_us']/1e6)
         trip=next(e for e in self.app.events if e["kind"]=="threshold_trip")
         issued=next(e for e in self.app.events if e["kind"]=="stop_command_issued")
         self.assertAlmostEqual(issued["observed_time_s"]-trip["observed_time_s"],1)
@@ -186,6 +214,76 @@ class TestAcousticLoop(unittest.TestCase):
         self.app.start()
         self.app.step()
         self.assertFalse(self.app.get_view('acoustic')['available'])
+
+    def test_station_step_owns_rule_without_framework_operation_or_observer(self):
+        self.app.engine.message_handler=None
+        self.source('start_strong')
+        with mock.patch.object(self.app.engine,'submit_business_operation',side_effect=AssertionError('应用层不得代发停机')):
+            self.advance(10)
+        station=self.app.engine.get_device('station')
+        self.assertIsInstance(station,AcousticStation)
+        self.assertTrue(station.state['trip_latched'])
+        self.assertFalse(self.app.acoustic.powered)
+        issued=next(e for e in self.app.events if e['kind']=='stop_command_issued')
+        self.assertEqual(issued['owner_device_id'],'station')
+        self.assertEqual(issued['emitted_from'],'AcousticStation.step')
+        self.assertTrue(any(d['request_id']==issued['request_id'] for d in station._last_dispatched))
+
+    def test_disabled_station_step_prevents_rule_and_command(self):
+        self.source('start_strong')
+        with mock.patch.object(self.app.engine.get_device('station'),'step',return_value=[]):
+            self.advance(10)
+        self.assertGreater(self.app.acoustic.feature['max_ratio'],2)
+        self.assertTrue(self.app.acoustic.powered)
+        self.assertFalse(self.app.acoustic.trip_latched)
+        self.assertFalse(any(e['kind']=='threshold_trip' for e in self.app.events))
+
+    def test_station_operates_in_engine_without_application_scheduler(self):
+        config=load_scenario(str(SCENARIO))
+        engine=AcousticEngine()
+        engine.build(config.devices,config.links,config.environment)
+        model=DemoModel({'time_scale':360})
+        for device in engine._devices.values():
+            if device.spec.device_type.startswith('acoustic_'):
+                device.model=model
+        model.response.switch(.9,0)
+        emitted=[]
+        for i in range(100):
+            emitted.extend(engine.step(i*100000,100000).messages)
+        self.assertFalse(model.powered)
+        self.assertTrue(engine.get_device('station').state['trip_latched'])
+        self.assertTrue(any(m.sender_id=='station' and m.receiver_id=='mc' and m.business_type=='command'
+                            for m in emitted))
+
+    def test_fan_status_does_not_replace_two_business_measurement_sources(self):
+        self.advance(4)
+        telemetry=self.app.engine.get_device('mc').build_telemetry()
+        self.assertEqual(set(telemetry['sources']),{'mu','mu_2'})
+        self.assertIn('vibration',telemetry['fan_sample'])
+        self.assertGreater(self.app.engine.get_device('station').last_window_s,0)
+
+    def test_topology_preserves_latest_main_template(self):
+        template_path=SCENARIO.parent.parent/'scenarios/substation-sensor-attack.json'
+        template=json.loads(template_path.read_text(encoding='utf-8'))
+        scenario=json.loads(SCENARIO.read_text(encoding='utf-8'))
+        template_devices={d['device_id']:d for d in template['devices']}
+        devices={d['device_id']:d for d in scenario['devices']}
+        self.assertEqual(set(devices),set(template_devices))
+        self.assertTrue({'mu_2','ct_current_2','time_svc_2','diff_prot','spectrum_detect_node'}.issubset(devices))
+        for key,device in template_devices.items():
+            self.assertEqual(devices[key]['layout'],device['layout'])
+        links={l['link_id']:l for l in scenario['links']}
+        for link in template['links']:
+            self.assertEqual(links[link['link_id']],link)
+        self.assertEqual(set(links)-{l['link_id'] for l in template['links']},{'L-fan-monitor-mc'})
+        self.assertEqual(links['L-fan-monitor-mc']['parameters']['protocol'],'mms')
+        layout=copy.deepcopy(scenario['layout'])
+        provenance=layout.pop('acoustic_template')
+        self.assertEqual(provenance['sha256'],hashlib.sha256(template_path.read_text(encoding='utf-8').encode('utf-8')).hexdigest())
+        process=next(n for n in layout['deployment']['networks'] if n['id']=='process')
+        process['link_ids'].remove('L-fan-monitor-mc')
+        next(c for c in process['connections'] if c['device_id']=='mc')['business_ports'].remove('fan_mu')
+        self.assertEqual(layout,template['layout'])
 
 
 class TestAcousticServer(unittest.TestCase):

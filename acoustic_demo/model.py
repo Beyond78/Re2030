@@ -94,6 +94,14 @@ class DemoModel:
 
     def __init__(self, parameters=None):
         self.parameters = dict(parameters or {})
+        self.thermal_time_scale = float(self.parameters.get("time_scale", 1.0))
+        if not math.isfinite(self.thermal_time_scale) or self.thermal_time_scale <= 0:
+            raise ValueError("热过程加速系数必须是有限正数")
+        self.thermal_mode = "original_scale" if self.thermal_time_scale == 1 else "accelerated_demo"
+        self.reference_capacity_j_per_k = 3600000.0
+        self.effective_capacity_j_per_k = self.reference_capacity_j_per_k / self.thermal_time_scale
+        self.reference_natural_tau_s = self.reference_capacity_j_per_k / 500
+        self.natural_tau_s = self.reference_natural_tau_s / self.thermal_time_scale
         self.provenance = json.loads((DATA / "provenance.json").read_text(encoding="utf-8"))
         with gzip.open(DATA / "normal_xyz.csv.gz", "rt", encoding="utf-8", newline="") as handle:
             self.baseline = [tuple(map(float, row)) for row in list(csv.reader(handle))[1:]]
@@ -101,8 +109,10 @@ class DemoModel:
         self.scales = tuple(pstdev(row[i] for row in self.baseline) for i in range(3))
         self.response = AcousticResponse()
         self.powered = True
+        self.trip_latched = False
         self.current_a, self.speed_ratio = 2.0, 1.0
         self.oil_c = self.oil_sensor_c = 55.0
+        self.oil_original_c = self.oil_original_sensor_c = 55.0
         self.time_s = 0.0
         self.cutoff_s = None
         self.last_sample = 0
@@ -121,8 +131,10 @@ class DemoModel:
             speed_mid = target + (old_speed - target) * math.exp(-dt / 10.0)
             conductance = 500 + 500 * speed_mid
             equilibrium = 25 + 30000 / conductance
-            self.oil_c = equilibrium + (self.oil_c - equilibrium) * math.exp(-conductance * dt / 3600000)
+            self.oil_c = equilibrium + (self.oil_c - equilibrium) * math.exp(-conductance * dt / self.effective_capacity_j_per_k)
             self.oil_sensor_c += (self.oil_c - self.oil_sensor_c) * (-math.expm1(-dt / 5))
+            self.oil_original_c = equilibrium + (self.oil_original_c - equilibrium) * math.exp(-conductance * dt / self.reference_capacity_j_per_k)
+            self.oil_original_sensor_c += (self.oil_original_c - self.oil_original_sensor_c) * (-math.expm1(-dt / 5))
             self.time_s += dt
 
     def set_power(self, powered, time_s):
