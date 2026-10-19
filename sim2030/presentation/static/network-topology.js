@@ -13,6 +13,42 @@ const NetworkTopology = (() => {
   const PORT_MARGIN = 12;
   const PORT_SPACING = 12;
   const MAX_LANES_PER_SIDE = 3;
+  const PROTOCOL_ORDER = ["mms", "sv", "goose"];
+  const ACCESS_STRAND_OFFSET = 1.8;
+
+  function protocolsForConnection(network, connection, linkMap) {
+    const found = new Set();
+    for (const id of network.link_ids || []) {
+      const link = linkMap.get(id);
+      if (!link) continue;
+      if (endpointId(link.endpoint_a) !== connection.device_id &&
+          endpointId(link.endpoint_b) !== connection.device_id) continue;
+      const protocol = String(link.parameters?.protocol || "").toLowerCase();
+      if (protocol) found.add(protocol);
+    }
+    return [...PROTOCOL_ORDER.filter(protocol => found.has(protocol)),
+      ...found].filter((protocol, index, all) => all.indexOf(protocol) === index);
+  }
+
+  function offsetAccessLine(points, offset) {
+    if (points.length < 3) return points.map(point => ({ x: point.x + offset, y: point.y + offset }));
+    // 接入线固定为“设备锚点 → 竖直走线 → 水平进交换机端口”，按协议并行平移成线束。
+    const [start, bend, end] = points;
+    return [
+      { x: start.x + offset, y: start.y },
+      { x: bend.x + offset, y: bend.y + offset },
+      { x: end.x, y: end.y + offset },
+    ];
+  }
+
+  function strandsFor(points, protocols) {
+    if (protocols.length < 2) return null;
+    const step = ACCESS_STRAND_OFFSET * 2;
+    return protocols.map((protocol, index) => ({
+      protocol,
+      points: offsetAccessLine(points, -ACCESS_STRAND_OFFSET * (protocols.length - 1) + step * index),
+    }));
+  }
 
   function pointAt(points, progress) {
     if (!points.length) return { x: 0, y: 0 };
@@ -95,10 +131,19 @@ const NetworkTopology = (() => {
 
       placements.forEach(({ connection, anchor, port }) => {
         const points = [anchor, { x: anchor.x, y: port.y }, port];
+        const protocols = protocolsForConnection(network, connection, linkMap);
+        const strands = strandsFor(points, protocols);
         access.set(connection.device_id, points);
-        interfaces.push({ ...connection, network_id: network.id, anchor, port });
-        cables.push({ id: `${network.id}:${connection.switch_port}`, kind: network.id, points,
-          title: `${connection.device_id} / ${connection.interface_id} ↔ ${sw.name} / ${connection.switch_port}` });
+        interfaces.push({ ...connection, network_id: network.id, anchor, port, protocols });
+        cables.push({
+          id: `${network.id}:${connection.switch_port}`,
+          kind: network.id,
+          points,
+          protocols,
+          ...(strands ? { strands } : {}),
+          title: `${connection.device_id} / ${connection.interface_id} ↔ ${sw.name} / ${connection.switch_port}`
+            + (protocols.length ? ` · ${protocols.map(protocol => protocol.toUpperCase()).join("+")}` : ""),
+        });
       });
       for (const id of network.link_ids) {
         const link = linkMap.get(id);

@@ -31,6 +31,43 @@ test('two isolated switches, two mirror feeds and independent reporting cables',
   }
 });
 
+test('live scenario access lines expose MMS/SV/GOOSE protocol sets', () => {
+  const access = new Map(model.cables
+    .filter(cable => cable.kind === 'station' || cable.kind === 'process')
+    .map(cable => [cable.id, cable]));
+  const expected = {
+    'station:P1': ['mms'],
+    'station:P2': ['mms'],
+    'station:P3': ['mms'],
+    'station:P4': ['mms'],
+    'process:P1': ['sv', 'goose'],
+    'process:P2': ['sv', 'goose'],
+    'process:P3': ['sv', 'goose'],
+    'process:P4': ['goose'],
+    'process:P5': ['goose'],
+    'process:P6': ['sv'],
+    'process:P7': ['sv'],
+    'process:P8': ['goose'],
+    'process:P9': [],
+  };
+  assert.equal(access.size, Object.keys(expected).length);
+  for (const [id, protocols] of Object.entries(expected)) {
+    const cable = access.get(id);
+    assert.ok(cable, `${id} 应存在`);
+    assert.deepEqual(cable.protocols, protocols, `${id} 协议集合`);
+    if (protocols.length > 1) {
+      assert.equal(cable.strands.length, protocols.length, `${id} 应为双色线束`);
+      for (const strand of cable.strands) {
+        assert.ok(strand.points.some((point, index) =>
+          point.x !== cable.points[index].x || point.y !== cable.points[index].y),
+        `${id} 的 ${strand.protocol} 线束应有偏移`);
+      }
+    } else {
+      assert.equal(cable.strands, undefined, `${id} 单协议不应拆线束`);
+    }
+  }
+});
+
 test('两套合并单元的量测都经过程网送达保护装置与测控装置', () => {
   for (const mu of ['mu', 'mu_2']) {
     for (const [receiver, targetPort] of [['mc', 'mu'], ['prot', 'in'], ['diff_prot', 'in']]) {

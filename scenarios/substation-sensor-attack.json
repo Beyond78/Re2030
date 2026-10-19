@@ -100,7 +100,7 @@
     },
     {
       "device_id": "diff_prot",
-      "layout": {"x": 465, "y": 356},
+      "layout": {"x": 600, "y": 356},
       "device_type": "differential_protection",
       "layer": "bay",
       "name": "差动保护装置",
@@ -596,7 +596,8 @@
       ],
       "link_type": "wired",
       "parameters": {
-        "delay_us": 1000
+        "delay_us": 1000,
+        "protocol": "mms"
       }
     },
     {
@@ -611,7 +612,8 @@
       ],
       "link_type": "wired",
       "parameters": {
-        "delay_us": 500
+        "delay_us": 500,
+        "protocol": "sv"
       }
     },
     {
@@ -626,7 +628,8 @@
       ],
       "link_type": "wired",
       "parameters": {
-        "delay_us": 500
+        "delay_us": 500,
+        "protocol": "sv"
       }
     },
     {
@@ -641,7 +644,8 @@
       ],
       "link_type": "wired",
       "parameters": {
-        "delay_us": 500
+        "delay_us": 500,
+        "protocol": "sv"
       }
     },
     {
@@ -656,7 +660,8 @@
       ],
       "link_type": "wired",
       "parameters": {
-        "delay_us": 500
+        "delay_us": 500,
+        "protocol": "sv"
       }
     },
     {
@@ -671,7 +676,8 @@
       ],
       "link_type": "wired",
       "parameters": {
-        "delay_us": 500
+        "delay_us": 500,
+        "protocol": "sv"
       }
     },
     {
@@ -686,7 +692,8 @@
       ],
       "link_type": "wired",
       "parameters": {
-        "delay_us": 500
+        "delay_us": 500,
+        "protocol": "sv"
       }
     },
     {
@@ -761,7 +768,8 @@
       ],
       "link_type": "wired",
       "parameters": {
-        "delay_us": 1000
+        "delay_us": 1000,
+        "protocol": "goose"
       }
     },
     {
@@ -776,7 +784,8 @@
       ],
       "link_type": "wired",
       "parameters": {
-        "delay_us": 1000
+        "delay_us": 1000,
+        "protocol": "goose"
       }
     },
     {
@@ -791,7 +800,8 @@
       ],
       "link_type": "wired",
       "parameters": {
-        "delay_us": 1000
+        "delay_us": 1000,
+        "protocol": "goose"
       }
     },
     {
@@ -806,7 +816,8 @@
       ],
       "link_type": "wired",
       "parameters": {
-        "delay_us": 800
+        "delay_us": 800,
+        "protocol": "goose"
       }
     },
     {
@@ -821,7 +832,8 @@
       ],
       "link_type": "wired",
       "parameters": {
-        "delay_us": 800
+        "delay_us": 800,
+        "protocol": "goose"
       }
     },
     {
@@ -836,7 +848,8 @@
       ],
       "link_type": "wired",
       "parameters": {
-        "delay_us": 1000
+        "delay_us": 1000,
+        "protocol": "mms"
       }
     },
     {
@@ -851,7 +864,8 @@
       ],
       "link_type": "wired",
       "parameters": {
-        "delay_us": 1000
+        "delay_us": 1000,
+        "protocol": "mms"
       }
     },
     {
